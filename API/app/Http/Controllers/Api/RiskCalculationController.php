@@ -28,65 +28,58 @@ class RiskCalculationController extends Controller
     public function store(Request $request)
     {
         $riskCalculationModel = new RiskCalculation();
-        $calculatorRules = $riskCalculationModel->validationRules();
-        $prefixedCalculatorRules = [];
-        foreach ($calculatorRules as $field => $rules) {
-            $prefixedCalculatorRules['calculatorResult.' . $field] = $rules;
-        }
+        $prefixedCalculatorRules = collect($riskCalculationModel->validationRules())
+            ->mapWithKeys(fn($rules, $field) => ['calculatorResult.' . $field => $rules])
+            ->all();
 
         $otherRules = [
-            'client.id' => 'nullable|exists:clients,id',
+            'client.id' => 'nullable|integer|exists:clients,id',
             'client.name' => 'required|string|max:255',
             'kecamatan.name' => 'required|string|max:255',
             'kecamatan.riskLevel' => ['required', 'string', Rule::in(['rendah', 'sedang', 'tinggi'])],
-
-            'inspection' => 'nullable|array',
-            'inspection.dateTime' => 'required_with:inspection|string',
-
-            'inspection.method' => 'required_with:inspection|string|max:255',
-            'inspection.status' => 'required_with:inspection|string|max:255',
-            'inspection.summary' => 'required_with:inspection|string',
-            'inspection.recommendation' => 'required_with:inspection|string',
-
+            'inspection' => 'required|array',
+            'inspection.dateTime' => 'required|string',
+            'inspection.agentName' => 'nullable|string',
+            'inspection.treatment' => 'required|string|max:255',
+            'inspection.status' => 'required|string|max:255',
+            'inspection.summary' => 'required|string',
+            'inspection.recommendation' => 'required|string',
             'inspection.images' => 'nullable|array',
-            'inspection.images.*.url' => 'required_with:inspection.images|string',
+            'inspection.images.*.url' => 'required|string',
             'inspection.images.*.description' => 'nullable|string',
         ];
 
-        $allRules = array_merge($prefixedCalculatorRules, $otherRules);
+        $request->validate(array_merge($prefixedCalculatorRules, $otherRules));
 
-        $validator = Validator::make($request->all(), $allRules);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        DB::beginTransaction();
         try {
-            $clientData = $request->input('client');
-            $calculatorResult = $request->input('calculatorResult');
-            $kecamatanData = $request->input('kecamatan');
-            $inspectionData = $request->input('inspection');
+            $result = DB::transaction(function () use ($request) {
+                $clientData = $request->input('client');
+                $calculatorResult = $request->input('calculatorResult');
+                $kecamatanData = $request->input('kecamatan');
+                $inspectionData = $request->input('inspection');
+                $client = null;
 
-            $client = Client::firstOrCreate(
-                ['name' => $clientData['name']]
-            );
-
-            $calculationData = array_merge(
-                $calculatorResult,
-                [
-                    'client_id' => $client->id,
-                    // 'user_id' => Auth::id(),
-                    'selected_kecamatan_name' => $kecamatanData['name'],
-                    'selected_kecamatan_risk_level' => $kecamatanData['riskLevel'],
-                ]
-            );
-            $riskCalculation = RiskCalculation::create($calculationData);
-
-            if ($inspectionData) {
+                if (!empty($clientData['id'])) {
+                    $client = Client::findOrFail($clientData['id']);
+                } else {
+                    $client = Client::firstOrCreate(
+                        ['name' => $clientData['name']]
+                    );
+                }
+                
+                $riskCalculation = RiskCalculation::create(array_merge(
+                    $calculatorResult,
+                    [
+                        'client_id' => $client->id,
+                        'user_id' => Auth::id(),
+                        'selected_kecamatan_name' => $kecamatanData['name'],
+                        'selected_kecamatan_risk_level' => $kecamatanData['riskLevel'],
+                    ]
+                ));
                 $inspection = $riskCalculation->inspection()->create([
+                    'agent_name' => $inspectionData['agentName'] ?? Auth::user()->name,
                     'date_time' => $inspectionData['dateTime'],
-                    'method' => $inspectionData['method'],
+                    'treatment' => $inspectionData['treatment'],
                     'status' => $inspectionData['status'],
                     'summary' => $inspectionData['summary'],
                     'recommendation' => $inspectionData['recommendation'],
@@ -95,23 +88,21 @@ class RiskCalculationController extends Controller
                 if (!empty($inspectionData['images'])) {
                     $inspection->images()->createMany($inspectionData['images']);
                 }
-            }
-            DB::commit();
+
+                return $riskCalculation->load('client', 'inspection.images');
+            });
 
             return response()->json([
                 'message' => 'Risk calculation and inspection saved successfully!',
-                'data' => $riskCalculation->load('client', 'inspection.images')
+                'data' => $result
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-
             Log::error('Failed to save risk calculation: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
-
             return response()->json([
-                'message' => 'An unexpected error occurred while saving the data. Please try again.'
+                'message' => 'An internal server error occurred while saving the data.'
             ], 500);
         }
     }

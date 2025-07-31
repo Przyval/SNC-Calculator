@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer } from "lucide-react"
+import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2 } from "lucide-react"
 import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
@@ -13,29 +13,104 @@ interface InspectionImage {
   description: string
 }
 
-// This interface now only defines the data it needs to display
 interface InspectionResultData {
+  id?: number;
   clientName?: string;
   dateTime: string;
   images: { url: string; description: string }[];
   summary: string;
   recommendation: string;
-  method: string;
+  treatment: string;
   status: string;
-  // agentName?: string;
+  agentName?: string;
+}
+
+interface ClientData { id: number | null; name: string; }
+interface PerhitunganData {   // Property fields
+  luasTanah: number;
+  umurBangunan: number;
+  // lokasiRumah: string;
+  materialBangunan: string;
+  riwayatRayap: string;
+  tingkatKelembaban: number;
+  jumlahPerabotKayu: number;
+  // adaDanauSebelumnya: string;
+  adaLahanKosongDisekitar: string;
+  // jenisTanah: string;
+  jenisLantai: string;
+  // Calculated fields from API
+  skorRisiko: number;
+  kategoriRisiko: string;
+  estimasiKerugian: number;
+  rekomendasiLayanan: string;
+  // Cost fields
+  biayaPerbaikan: number;
+  biayaLayanan: number;
+  penghematan: number;
+}
+interface KecamatanData { id: string; name: string; riskLevel: "tinggi" | "sedang" | "rendah"; }
+interface FullExportData {
+  client: ClientData | null;
+  hasilPerhitungan: PerhitunganData | null;
+  selectedKecamatan: KecamatanData | null;
+  inspectionResults: InspectionResultData | null;
 }
 
 interface InspectionResultsProps {
-  inspectionResults: InspectionResultData | null
+  inspectionResults: InspectionResultData | null;
+  // Add the new prop here
+  fullExportData: FullExportData;
 }
 
 const laravelLoader = ({ src }: { src: string }) => {
-  return `https://kalkulatorsnc.my.id${src}`;
+  // return `https://kalkulatorsnc.my.id${src}`;
+  return `http://localhost:8000${src}`;
 };
 
-export default function InspectionResults({ inspectionResults }: InspectionResultsProps) {
+export default function InspectionResults({ inspectionResults, fullExportData }: InspectionResultsProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [isZoomed, setIsZoomed] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // THIS IS THE CORRECTED DOWNLOAD HANDLER
+  const handleDownload = async () => {
+    // Check if the full data object is available
+    if (!fullExportData || !fullExportData.client || !fullExportData.inspectionResults) {
+      console.error("Cannot download: Data is incomplete.", fullExportData);
+      // Optionally, show an error to the user
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      const response = await fetch('dashboard/api/export-inspection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(fullExportData),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Download failed: ${errorText}`);
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Hasil_Inspeksi_${fullExportData.client.name.replace(/ /g, '_')}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Download failed:", error);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const nextSlide = () => {
     if (!inspectionResults || inspectionResults.images.length === 0) return;
@@ -56,7 +131,7 @@ export default function InspectionResults({ inspectionResults }: InspectionResul
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Terdeteksi Rayap": return "bg-red-500/80";
-      case "Butuh Pengecekan Lanjut": return "bg-yellow-500/80";
+      case "Butuh Pencegahan": return "bg-yellow-500/80";
       case "Aman": return "bg-green-500/80";
       default: return "bg-gray-500/80";
     }
@@ -65,12 +140,11 @@ export default function InspectionResults({ inspectionResults }: InspectionResul
   const getRecommendationSummary = (status: string) => {
     switch (status) {
       case "Terdeteksi Rayap": return "Penanganan Segera";
-      case "Butuh Pengecekan Lanjut": return "Perlu Investigasi";
+      case "Butuh Pencegahan": return "Perlu Investigasi";
       case "Aman": return "Tidak Perlu";
       default: return "-";
     }
   }
-
   return (
     <Card className="p-6 bg-black/90 border-l-4 border-yellow-500 text-white shadow-lg">
       <div className="flex items-center justify-between gap-2 mb-6">
@@ -80,7 +154,20 @@ export default function InspectionResults({ inspectionResults }: InspectionResul
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="border-amber-600 text-amber-500"><Printer className="h-4 w-4 mr-1" />Cetak</Button>
-          <Button variant="outline" size="sm" className="border-amber-600 text-amber-500"><Download className="h-4 w-4 mr-1" />Unduh</Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-amber-600 text-amber-500"
+            onClick={handleDownload}
+            disabled={isDownloading}
+          >
+            {isDownloading ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-1" />
+            )}
+            Unduh
+          </Button>
           <Button variant="outline" size="sm" className="border-amber-600 text-amber-500"><Share2 className="h-4 w-4 mr-1" />Bagikan</Button>
         </div>
       </div>
@@ -92,8 +179,8 @@ export default function InspectionResults({ inspectionResults }: InspectionResul
             <div className="space-y-2">
               <div className="flex"><span className="text-white/70 w-28">Nama Klien:</span><span className="font-medium">{inspectionResults.clientName}</span></div>
               <div className="flex"><span className="text-white/70 w-28">Jam/Tanggal:</span><span className="font-medium">{inspectionResults.dateTime}</span></div>
-              <div className="flex"><span className="text-white/70 w-28">Metode:</span><span className="font-medium">{inspectionResults.method}</span></div>
-              {/* <div className="flex"><span className="text-white/70 w-28">Diinput oleh:</span><span className="font-medium">{inspectionResults.agentName}</span></div> */}
+              <div className="flex"><span className="text-white/70 w-28">Metode:</span><span className="font-medium">{inspectionResults.treatment}</span></div>
+              <div className="flex"><span className="text-white/70 w-28">Diinput oleh:</span><span className="font-medium">{inspectionResults.agentName}</span></div>
             </div>
           </div>
           <div>

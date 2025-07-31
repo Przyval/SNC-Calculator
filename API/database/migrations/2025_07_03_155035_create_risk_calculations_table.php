@@ -13,16 +13,18 @@ return new class extends Migration {
         Schema::create('risk_calculations', function (Blueprint $table) {
             $table->id();
             $table->foreignId('client_id')->constrained()->onDelete('cascade');
-            // $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->float('luasRumah');
+            $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            $table->float('luasTanah');
             $table->integer('umurBangunan');
-            $table->string('lokasiRumah');
+            // $table->string('lokasiRumah'); buang
             $table->string('materialBangunan');
             $table->string('riwayatRayap');
             $table->float('tingkatKelembaban');
             $table->integer('jumlahPerabotKayu');
-            $table->string('adaDanauSebelumnya');
-            $table->string('jenisTanah');
+            // $table->string('adaDanauSebelumnya');
+            $table->string('adaLahanKosongDisekitar');
+            // $table->string('jenisTanah');
+            $table->string('jenisLantai');
 
             // Calculated fields
             $table->integer('skorRisiko');

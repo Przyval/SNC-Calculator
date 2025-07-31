@@ -13,8 +13,9 @@ return new class extends Migration {
          Schema::create('inspections', function (Blueprint $table) {
             $table->id();
             $table->foreignId('risk_calculation_id')->constrained()->onDelete('cascade');
+            $table->string('agent_name')->nullable();
             $table->string('date_time');
-            $table->string('method');
+            $table->string('treatment');
             $table->string('status');
             $table->text('summary')->nullable();
             $table->text('recommendation')->nullable();

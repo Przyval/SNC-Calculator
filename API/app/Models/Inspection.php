@@ -15,7 +15,7 @@ class Inspection extends Model
         'date_time',
         'summary',
         'recommendation',
-        'method',
+        'treatment',
         'status',
     ];
 

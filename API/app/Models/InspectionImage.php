@@ -19,4 +19,9 @@ class InspectionImage extends Model
     {
         return $this->belongsTo(Inspection::class);
     }
+
+    public function getFullUrlAttribute()
+    {
+        return Storage::url($this->url);
+    }
 }

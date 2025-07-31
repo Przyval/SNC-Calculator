@@ -27,9 +27,9 @@ export default function RootLayout({
       </head>
       <body className={inter.variable}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          {/* <Providers> */}
+          <Providers>
             {children}
-          {/* </Providers> */}
+          </Providers>
         </ThemeProvider>
       </body>
     </html>

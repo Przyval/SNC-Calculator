@@ -11,22 +11,24 @@ class RiskCalculatorController extends Controller
     {
         Log::info("Risk calculation request received", ['request_data' => $request->all()]);
         $data = $request->validate([
-            'luasRumah' => 'required|numeric',
+            'luasTanah' => 'required|numeric',
             'umurBangunan' => 'required|numeric',
-            'lokasiRumah' => 'required|string',
+            // 'lokasiRumah' => 'required|string',
             'materialBangunan' => 'required|string',
             'riwayatRayap' => 'required|string',
             'tingkatKelembaban' => 'required|numeric',
             'jumlahPerabotKayu' => 'required|numeric',
-            'adaDanauSebelumnya' => 'required|string',
-            'jenisTanah' => 'required|string',
+            // 'adaDanauSebelumnya' => 'required|string',
+            'adaLahanKosongDisekitar' => 'required|string',
+            // 'jenisTanah' => 'required|string',
+            'jenisLantai' => 'required|string',
         ]);
 
         $skor = min($data['umurBangunan'] * 4, 40);
 
-        if ($data['lokasiRumah'] === "dekat-air") $skor += 20;
-        elseif ($data['lokasiRumah'] === "pinggiran-kota") $skor += 15;
-        elseif ($data['lokasiRumah'] === "perkotaan") $skor += 10;
+        // if ($data['lokasiRumah'] === "dekat-air") $skor += 20;
+        // elseif ($data['lokasiRumah'] === "pinggiran-kota") $skor += 15;
+        // elseif ($data['lokasiRumah'] === "perkotaan") $skor += 10;
 
         if ($data['materialBangunan'] === "kayu-dominan") $skor += 25;
         elseif ($data['materialBangunan'] === "kayu-sedang") $skor += 15;
@@ -35,12 +37,13 @@ class RiskCalculatorController extends Controller
         if ($data['riwayatRayap'] === "ya") $skor += 25;
         $skor += floor($data['tingkatKelembaban'] / 5);
         $skor += min(floor($data['jumlahPerabotKayu'] / 2), 15);
-        if ($data['adaDanauSebelumnya'] === "ya") $skor += 15;
-
-        if ($data['jenisTanah'] === "gambut") $skor += 20;
-        elseif ($data['jenisTanah'] === "berpasir") $skor += 15;
-        elseif ($data['jenisTanah'] === "liat") $skor += 10;
-        elseif ($data['jenisTanah'] === "berbatu") $skor += 5;
+        // if ($data['adaDanauSebelumnya'] === "ya") $skor += 15;
+        if ($data['adaLahanKosongDisekitar'] === "ya") $skor += 15;
+        
+        // if ($data['jenisTanah'] === "gambut") $skor += 20;
+        // elseif ($data['jenisTanah'] === "berpasir") $skor += 15;
+        // elseif ($data['jenisTanah'] === "liat") $skor += 10;
+        // elseif ($data['jenisTanah'] === "berbatu") $skor += 5;
 
         $skor = min($skor, 100);
 
@@ -58,7 +61,7 @@ class RiskCalculatorController extends Controller
             "Sangat Tinggi" => 1500000,
         ];
 
-        $estimasiKerugian = $data['luasRumah'] * $biayaPerMeter[$kategori];
+        $estimasiKerugian = $data['luasTanah'] * $biayaPerMeter[$kategori];
 
         $rekomendasi = match (true) {
             $skor < 30 => "Pemeriksaan tahunan dan tindakan pencegahan dasar",

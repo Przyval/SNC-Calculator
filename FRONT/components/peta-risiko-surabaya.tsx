@@ -4,12 +4,13 @@ import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
-import { MapPin, AlertTriangle, Info, X, Search, Compass, Layers, ZoomIn, ZoomOut, Filter } from "lucide-react"
+import { MapPin, AlertTriangle, Info, X, Search, Compass, Layers, ZoomIn, ZoomOut, Filter, LocateFixed } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { motion, AnimatePresence } from "framer-motion"
+import pointInPolygon from 'point-in-polygon';
 
 interface KecamatanData {
   id: string
@@ -24,6 +25,7 @@ interface KecamatanData {
   }
   path: string
   region: "barat" | "utara" | "pusat" | "timur" | "selatan"
+  geoJsonPolygon?: number[][]
 }
 
 interface PetaRisikoSurabayaProps {
@@ -31,6 +33,7 @@ interface PetaRisikoSurabayaProps {
 }
 
 export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSurabayaProps) {
+  // Existing states
   const [selectedKecamatan, setSelectedKecamatan] = useState<KecamatanData | null>(null)
   const [hoveredKecamatan, setHoveredKecamatan] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -47,10 +50,17 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
   const [showLandmarks, setShowLandmarks] = useState(false)
   const [mapTheme, setMapTheme] = useState<"standard" | "satellite" | "dark">("standard")
 
+  // New states for GPS functionality
+  const [gpsLockedKecamatan, setGpsLockedKecamatan] = useState<KecamatanData | null>(null)
+  const [locationStatus, setLocationStatus] = useState<"loading" | "detected" | "outside_map" | "permission_denied" | "idle">(
+    "loading",
+  )
+  const isGpsLocked = gpsLockedKecamatan !== null
+
   const mapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
-  // Data kecamatan Surabaya dengan tingkat risiko rayap
+  // Data kecamatan Surabaya (remains unchanged)
   const kecamatanData: KecamatanData[] = [
     // SURABAYA BARAT (WEST)
     {
@@ -64,6 +74,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 15, y: 20 },
       path: "M10,10 L5,35 L20,50 L30,35 L25,25 L15,15 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.63150787, -7.2605052], [112.61721039, -7.25752592], [112.61455536, -7.24820757], [112.60349274, -7.24763536], [112.60459137, -7.23331451], [112.5989151, -7.22958851], [112.59268951, -7.20230389], [112.61344147, -7.20904303], [112.62567902, -7.20331717], [112.6272583, -7.22245979], [112.63558197, -7.23548222], [112.63150787, -7.2605052]
+      ]
     },
     {
       id: "benowo",
@@ -76,6 +89,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 35, y: 30 },
       path: "M25,25 L30,35 L45,40 L50,30 L45,20 L25,25 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.63279724, -7.26402998], [112.63150787, -7.2605052], [112.63558197, -7.23548222], [112.6272583, -7.22245979], [112.62567902, -7.20331717], [112.65917206, -7.19635439], [112.66149139, -7.1930027], [112.66210175, -7.20852995], [112.66837311, -7.22010994], [112.66060638, -7.23724985], [112.65441895, -7.24261999], [112.65962219, -7.26253986], [112.65223694, -7.25767994], [112.63279724, -7.26402998]
+      ]
     },
     {
       id: "lakarsantri",
@@ -88,6 +104,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 20, y: 70 },
       path: "M10,60 L15,85 L30,90 L40,75 L35,65 L25,75 L20,50 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.66456604, -7.35144043], [112.65634155, -7.35682011], [112.65383148, -7.33899784], [112.64850616, -7.33530045], [112.64935303, -7.31456327], [112.62941742, -7.31164026], [112.62865448, -7.28963995], [112.64559937, -7.28887987], [112.67193604, -7.29252338], [112.67160797, -7.31753016], [112.67499542, -7.33310366], [112.66525269, -7.34040356], [112.66456604, -7.35144043]
+      ]
     },
     {
       id: "sambikerep",
@@ -100,6 +119,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 30, y: 45 },
       path: "M20,50 L30,35 L45,40 L40,50 L35,65 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.68412018, -7.27687073], [112.67858887, -7.28373337], [112.67193604, -7.29252338], [112.64559937, -7.28887987], [112.62865448, -7.28963995], [112.62688446, -7.27648211], [112.63279724, -7.26402998], [112.65223694, -7.25767994], [112.65962219, -7.26253986], [112.67642975, -7.26262808], [112.68412018, -7.27687073]
+      ]
     },
     {
       id: "tandes",
@@ -112,6 +134,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 45, y: 50 },
       path: "M40,50 L45,40 L55,45 L60,55 L50,60 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.65962219, -7.26253986], [112.65441895, -7.24261999], [112.66060638, -7.23724985], [112.67688751, -7.2490201], [112.69204712, -7.25273991], [112.68447113, -7.27502775], [112.68412018, -7.27687073], [112.67642975, -7.26262808], [112.65962219, -7.26253986]
+      ]
     },
     {
       id: "sukomanunggal",
@@ -124,6 +149,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 50, y: 45 },
       path: "M45,40 L55,45 L60,40 L55,35 L50,30 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.68447113, -7.27502775], [112.69204712, -7.25273991], [112.71434021, -7.25611019], [112.70860291, -7.27571535], [112.70220947, -7.28479767], [112.68447113, -7.27502775]
+      ]
     },
     {
       id: "asemrowo",
@@ -136,6 +164,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 55, y: 35 },
       path: "M50,30 L55,35 L60,40 L65,35 L60,25 L50,30 Z",
       region: "barat",
+      geoJsonPolygon: [
+        [112.71711731, -7.2471199], [112.71508026, -7.25506735], [112.71434021, -7.25611019], [112.69204712, -7.25273991], [112.67688751, -7.2490201], [112.66060638, -7.23724985], [112.66837311, -7.22010994], [112.68627167, -7.22540998], [112.70623779, -7.22476006], [112.71033478, -7.24018431], [112.71711731, -7.2471199]
+      ]
     },
 
     // SURABAYA UTARA (NORTH)
@@ -150,6 +181,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 65, y: 30 },
       path: "M60,25 L65,35 L75,35 L80,25 L70,20 L60,25 Z",
       region: "utara",
+      geoJsonPolygon: [
+        [112.70623779, -7.22476006], [112.72158813, -7.21027994], [112.73827362, -7.23170996], [112.74259186, -7.24403238], [112.7279129, -7.24243021], [112.71711731, -7.2471199], [112.71033478, -7.24018431], [112.70623779, -7.22476006]
+      ]
     },
     {
       id: "pabean-cantikan",
@@ -162,6 +196,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 70, y: 25 },
       path: "M70,20 L80,25 L85,20 L80,15 L75,15 Z",
       region: "utara",
+      geoJsonPolygon: [
+        [112.74259186, -7.24403238], [112.73827362, -7.23170996], [112.72158813, -7.21027994], [112.73272705, -7.20664978], [112.73493195, -7.19610023], [112.73813629, -7.22376013], [112.74292755, -7.2342701], [112.74733734, -7.24354458], [112.7421875, -7.24774981], [112.74259186, -7.24403238]
+      ]
     },
     {
       id: "semampir",
@@ -174,6 +211,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 80, y: 20 },
       path: "M75,15 L80,15 L85,20 L90,15 L85,10 Z",
       region: "utara",
+      geoJsonPolygon: [
+        [112.74292755, -7.2342701], [112.73813629, -7.22376013], [112.73493195, -7.19610023], [112.75698853, -7.19776917], [112.7620697, -7.20833969], [112.75762939, -7.23456812], [112.74292755, -7.2342701]
+      ]
     },
     {
       id: "kenjeran",
@@ -186,6 +226,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 90, y: 25 },
       path: "M85,10 L90,15 L95,25 L90,35 L85,20 Z",
       region: "utara",
+      geoJsonPolygon: [
+        [112.77056885, -7.23570633], [112.76370239, -7.23632002], [112.75762939, -7.23456812], [112.7620697, -7.20833969], [112.75698853, -7.19776917], [112.77475739, -7.20304728], [112.77867126, -7.21335983], [112.77865601, -7.21936321], [112.78408813, -7.22160006], [112.77056885, -7.23570633]
+      ]
     },
     {
       id: "bulak",
@@ -198,6 +241,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 90, y: 35 },
       path: "M85,20 L90,35 L85,45 L75,35 Z",
       region: "utara",
+      geoJsonPolygon: [
+        [112.78926086, -7.24780512], [112.78404236, -7.23511982], [112.77056885, -7.23570633], [112.78408813, -7.22160006], [112.79416656, -7.23081017], [112.80654907, -7.25567961], [112.78926086, -7.24780512]
+      ]
     },
     {
       id: "simokerto",
@@ -210,6 +256,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 75, y: 30 },
       path: "M75,35 L85,45 L80,50 L70,40 L75,35 Z",
       region: "utara",
+      geoJsonPolygon: [
+        [112.75325012, -7.24911928], [112.74733734, -7.24354458], [112.74292755, -7.2342701], [112.75762939, -7.23456812], [112.76370239, -7.23632002], [112.75325012, -7.24911928]
+      ]
     },
 
     // SURABAYA PUSAT (CENTRAL)
@@ -224,6 +273,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 65, y: 40 },
       path: "M65,35 L75,35 L70,40 L65,50 L60,55 L60,40 L65,35 Z",
       region: "pusat",
+      geoJsonPolygon: [
+        [112.71508026, -7.25506735], [112.71711731, -7.2471199], [112.7279129, -7.24243021], [112.74259186, -7.24403238], [112.7421875, -7.24774981], [112.73429871, -7.25588322], [112.71508026, -7.25506735]
+      ]
     },
     {
       id: "genteng",
@@ -236,6 +288,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 70, y: 45 },
       path: "M70,40 L80,50 L75,55 L65,50 L70,40 Z",
       region: "pusat",
+      geoJsonPolygon: [
+        [112.73319244, -7.25839996], [112.73429871, -7.25588322], [112.7421875, -7.24774981], [112.74733734, -7.24354458], [112.75325012, -7.24911928], [112.7509613, -7.2679801], [112.74391174, -7.27426004], [112.7401123, -7.26133919], [112.73319244, -7.25839996]
+      ]
     },
     {
       id: "tegalsari",
@@ -248,6 +303,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 65, y: 55 },
       path: "M60,55 L65,50 L75,55 L70,60 Z",
       region: "pusat",
+      geoJsonPolygon: [
+        [112.72768402, -7.27633047], [112.73319244, -7.25839996], [112.7401123, -7.26133919], [112.74391174, -7.27426004], [112.74411011, -7.27722979], [112.73592377, -7.28965235], [112.72768402, -7.27633047]
+      ]
     },
     {
       id: "sawahan",
@@ -260,6 +318,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 60, y: 60 },
       path: "M50,60 L60,55 L70,60 L65,70 L55,65 Z",
       region: "pusat",
+      geoJsonPolygon: [
+        [112.70860291, -7.27571535], [112.71434021, -7.25611019], [112.71508026, -7.25506735], [112.73429871, -7.25588322], [112.73319244, -7.25839996], [112.72768402, -7.27633047], [112.7249527, -7.2922101], [112.71343994, -7.29033184], [112.71737671, -7.27953911], [112.70860291, -7.27571535]
+      ]
     },
 
     // SURABAYA TIMUR (EAST)
@@ -274,6 +335,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 80, y: 55 },
       path: "M75,55 L80,50 L90,55 L85,65 L75,65 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.76370239, -7.23632002], [112.77056885, -7.23570633], [112.78404236, -7.23511982], [112.78926086, -7.24780512], [112.77725983, -7.25489998], [112.7763443, -7.26409721], [112.7641983, -7.26281023], [112.7509613, -7.2679801], [112.75325012, -7.24911928], [112.76370239, -7.23632002]
+      ]
     },
     {
       id: "gubeng",
@@ -286,6 +350,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 75, y: 65 },
       path: "M70,60 L75,55 L75,65 L70,70 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.7591629, -7.30539989], [112.75679016, -7.30473995], [112.75713348, -7.29361296], [112.74751282, -7.29032993], [112.74411011, -7.27722979], [112.74391174, -7.27426004], [112.7509613, -7.2679801], [112.7641983, -7.26281023], [112.7763443, -7.26409721], [112.77198792, -7.28043985], [112.76435089, -7.27961874], [112.76303864, -7.28915739], [112.76194, -7.30615997], [112.7591629, -7.30539989]
+      ]
     },
     {
       id: "mulyorejo",
@@ -298,6 +365,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 90, y: 60 },
       path: "M85,45 L90,55 L95,65 L85,65 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.7763443, -7.26409721], [112.77725983, -7.25489998], [112.78926086, -7.24780512], [112.80654907, -7.25567961], [112.82698822, -7.26176977], [112.82793427, -7.26945114], [112.81195831, -7.28066015], [112.79936218, -7.27431774], [112.78388977, -7.27692986], [112.78516388, -7.2842207], [112.7705307, -7.2811451], [112.76303864, -7.28915739], [112.76435089, -7.27961874], [112.77198792, -7.28043985], [112.7763443, -7.26409721]
+      ]
     },
     {
       id: "sukolilo",
@@ -310,6 +380,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 85, y: 75 },
       path: "M85,65 L95,65 L90,80 L80,75 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.77095795, -7.30861998], [112.76194, -7.30615997], [112.76303864, -7.28915739], [112.7705307, -7.2811451], [112.78516388, -7.2842207], [112.78388977, -7.27692986], [112.79936218, -7.27431774], [112.81195831, -7.28066015], [112.82793427, -7.26945114], [112.83981323, -7.27767992], [112.84690094, -7.29666996], [112.84568024, -7.3041501], [112.83888245, -7.31018019], [112.82196808, -7.30678988], [112.81118774, -7.29890013], [112.80339813, -7.30756998], [112.78035736, -7.31073999], [112.77095795, -7.30861998]
+      ]
     },
     {
       id: "rungkut",
@@ -322,6 +395,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 90, y: 85 },
       path: "M80,75 L90,80 L95,90 L85,95 L75,85 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.75749969, -7.33031988], [112.77095795, -7.30861998], [112.78035736, -7.31073999], [112.80339813, -7.30756998], [112.81118774, -7.29890013], [112.82196808, -7.30678988], [112.83888245, -7.31018019], [112.84568024, -7.3041501], [112.8425293, -7.31696987], [112.827034, -7.33286524], [112.82228088, -7.33033991], [112.79476166, -7.33337021], [112.75749969, -7.33031988]
+      ]
     },
     {
       id: "gunung-anyar",
@@ -334,6 +410,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 85, y: 95 },
       path: "M75,85 L85,95 L90,100 L70,95 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.827034, -7.33286524], [112.82589722, -7.34321976], [112.81293488, -7.34628057], [112.78956604, -7.34409332], [112.75508881, -7.33682013], [112.75749969, -7.33031988], [112.79476166, -7.33337021], [112.82228088, -7.33033991], [112.827034, -7.33286524]
+      ]
     },
     {
       id: "tenggilis-mejoyo",
@@ -346,6 +425,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 75, y: 80 },
       path: "M70,70 L75,65 L80,75 L75,85 L65,80 Z",
       region: "timur",
+      geoJsonPolygon: [
+        [112.74302673, -7.34081507], [112.74398804, -7.32260275], [112.7591629, -7.30539989], [112.76194, -7.30615997], [112.77095795, -7.30861998], [112.75749969, -7.33031988], [112.75508881, -7.33682013], [112.74302673, -7.34081507]
+      ]
     },
 
     // SURABAYA SELATAN (SOUTH)
@@ -360,6 +442,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 70, y: 75 },
       path: "M65,70 L70,70 L75,65 L70,60 L65,70 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.75679016, -7.30473995], [112.741745, -7.30587244], [112.73522186, -7.31116724], [112.7232666, -7.30768394], [112.72080231, -7.30800009], [112.7249527, -7.2922101], [112.72768402, -7.27633047], [112.73592377, -7.28965235], [112.74411011, -7.27722979], [112.74751282, -7.29032993], [112.75713348, -7.29361296], [112.75679016, -7.30473995]
+      ]
     },
     {
       id: "wonocolo",
@@ -372,6 +457,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 65, y: 75 },
       path: "M60,75 L65,70 L65,80 L60,85 L55,80 L60,75 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.74302673, -7.34081507], [112.73775482, -7.34494734], [112.72931671, -7.33950377], [112.73522186, -7.31116724], [112.741745, -7.30587244], [112.75679016, -7.30473995], [112.7591629, -7.30539989], [112.74398804, -7.32260275], [112.74302673, -7.34081507]
+      ]
     },
     {
       id: "gayungan",
@@ -384,6 +472,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 60, y: 85 },
       path: "M55,80 L60,85 L55,90 L50,85 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.71568298, -7.34181118], [112.7161026, -7.33993292], [112.71800995, -7.32854986], [112.72647858, -7.31787014], [112.7232666, -7.30768394], [112.73522186, -7.31116724], [112.72931671, -7.33950377], [112.73775482, -7.34494734], [112.7256012, -7.34820986], [112.71568298, -7.34181118]
+      ]
     },
     {
       id: "jambangan",
@@ -396,6 +487,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 55, y: 80 },
       path: "M50,75 L55,80 L50,85 L45,80 L50,75 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.70471954, -7.3361001], [112.71030426, -7.32910633], [112.71134949, -7.31274986], [112.71388245, -7.30773163], [112.72080231, -7.30800009], [112.7232666, -7.30768394], [112.72647858, -7.31787014], [112.71800995, -7.32854986], [112.7161026, -7.33993292], [112.70471954, -7.3361001]
+      ]
     },
     {
       id: "karangpilang",
@@ -408,6 +502,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 45, y: 85 },
       path: "M40,75 L45,80 L50,85 L45,90 L35,85 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.66456604, -7.35144043], [112.66525269, -7.34040356], [112.67499542, -7.33310366], [112.69532013, -7.32636833], [112.70165253, -7.31530428], [112.71134949, -7.31274986], [112.71030426, -7.32910633], [112.70471954, -7.3361001], [112.67835999, -7.35043097], [112.66456604, -7.35144043]
+      ]
     },
     {
       id: "dukuh-pakis",
@@ -420,6 +517,9 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 50, y: 70 },
       path: "M45,70 L50,75 L55,65 L50,60 L45,70 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.71388245, -7.30773163], [112.67573547, -7.29424953], [112.67858887, -7.28373337], [112.68412018, -7.27687073], [112.68447113, -7.27502775], [112.70220947, -7.28479767], [112.70860291, -7.27571535], [112.71737671, -7.27953911], [112.71343994, -7.29033184], [112.7249527, -7.2922101], [112.72080231, -7.30800009], [112.71388245, -7.30773163]
+      ]
     },
     {
       id: "wiyung",
@@ -432,49 +532,98 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
       coordinates: { x: 40, y: 75 },
       path: "M35,65 L40,75 L45,70 L40,60 Z",
       region: "selatan",
+      geoJsonPolygon: [
+        [112.67499542, -7.33310366], [112.67160797, -7.31753016], [112.67193604, -7.29252338], [112.67858887, -7.28373337], [112.67573547, -7.29424953], [112.71388245, -7.30773163], [112.71134949, -7.31274986], [112.70165253, -7.31530428], [112.69532013, -7.32636833], [112.67499542, -7.33310366]
+      ]
     },
   ]
 
-  // Define major roads for the map
+  // --- START OF NEW GPS LOGIC ---
+  const findKecamatanByCoords = (lat: number, lon: number): KecamatanData | null => {
+    console.log(`Checking real coordinates: Lat ${lat}, Lon ${lon}`);
+    const userLocation = [lon, lat]; // GeoJSON format is [longitude, latitude]
+
+    // Loop through all your kecamatans
+    for (const kecamatan of kecamatanData) {
+      // Check if the kecamatan has polygon data and if the user's location is inside it
+      if (kecamatan.geoJsonPolygon && pointInPolygon(userLocation, kecamatan.geoJsonPolygon)) {
+        // If it's a match, return that kecamatan object
+        return kecamatan;
+      }
+    }
+
+    // If the loop finishes without finding a match, the user is outside all defined areas.
+    return null;
+  };
+
+  useEffect(() => {
+    // This part of the code remains exactly the same.
+    // It will now correctly use your new, non-random findKecamatanByCoords function.
+    if (navigator.geolocation) {
+      console.log("Requesting user location...");
+      setLocationStatus("loading");
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          console.log(`Location acquired: Lat: ${latitude}, Lon: ${longitude}`);
+
+          const detectedKecamatan = findKecamatanByCoords(latitude, longitude);
+
+          if (detectedKecamatan) {
+            console.log("Lokasi terdeteksi di dalam peta:", detectedKecamatan.name);
+            setGpsLockedKecamatan(detectedKecamatan);
+            setSelectedKecamatan(detectedKecamatan);
+            setLocationStatus("detected");
+          } else {
+            console.log("Lokasi GPS berada di luar area peta Surabaya.");
+            setLocationStatus("outside_map");
+          }
+        },
+        (error) => {
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              console.log("Izin lokasi ditolak oleh pengguna.");
+              break;
+            case error.POSITION_UNAVAILABLE:
+              console.log("Informasi lokasi tidak tersedia.");
+              break;
+            case error.TIMEOUT:
+              console.log("Permintaan lokasi timeout.");
+              break;
+            default:
+              console.log("Terjadi kesalahan saat mengambil lokasi.");
+              break;
+          }
+          setLocationStatus("permission_denied");
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    } else {
+      console.log("Geolocation tidak didukung oleh browser ini.");
+      setLocationStatus("permission_denied");
+    }
+  }, []);
+
+  // --- END OF NEW GPS LOGIC ---
+
   const majorRoads = [
-    // Main highways
-    "M10,50 L90,50", // East-West Highway
-    "M50,10 L50,90", // North-South Highway
-    // Ring roads
-    "M20,20 Q50,10 80,20 Q90,50 80,80 Q50,90 20,80 Q10,50 20,20", // Outer ring road
-    "M30,30 Q50,25 70,30 Q75,50 70,70 Q50,75 30,70 Q25,50 30,30", // Middle ring road
+    "M10,50 L90,50",
+    "M50,10 L50,90",
+    "M20,20 Q50,10 80,20 Q90,50 80,80 Q50,90 20,80 Q10,50 20,20",
+    "M30,30 Q50,25 70,30 Q75,50 70,70 Q50,75 30,70 Q25,50 30,30",
   ]
-
-  // Define water bodies
   const waterBodies = [
-    {
-      path: "M85,5 Q95,15 95,30 L90,40 L85,45 L80,35 L85,5 Z", // Madura Strait
-      name: "Selat Madura",
-      type: "sea",
-    },
-    {
-      path: "M60,45 Q65,50 60,55 L55,53 L52,50 L55,47 Z", // Central lake
-      name: "Danau Kota",
-      type: "lake",
-    },
-    {
-      path: "M40,30 L45,35 L43,40 L38,38 L35,35 Z", // Western lake
-      name: "Waduk Barat",
-      type: "lake",
-    },
-    {
-      path: "M15,40 Q25,45 15,50 L10,45 Z", // Western river
-      name: "Sungai Barat",
-      type: "river",
-    },
-    {
-      path: "M70,70 L75,75 L73,80 L68,78 L65,75 Z", // Eastern lake
-      name: "Waduk Timur",
-      type: "lake",
-    },
+    { path: "M85,5 Q95,15 95,30 L90,40 L85,45 L80,35 L85,5 Z", name: "Selat Madura", type: "sea" },
+    { path: "M60,45 Q65,50 60,55 L55,53 L52,50 L55,47 Z", name: "Danau Kota", type: "lake" },
+    { path: "M40,30 L45,35 L43,40 L38,38 L35,35 Z", name: "Waduk Barat", type: "lake" },
+    { path: "M15,40 Q25,45 15,50 L10,45 Z", name: "Sungai Barat", type: "river" },
+    { path: "M70,70 L75,75 L73,80 L68,78 L65,75 Z", name: "Waduk Timur", type: "lake" },
   ]
-
-  // Define landmarks
   const landmarks = [
     { x: 65, y: 45, name: "Tugu Pahlawan", icon: "🏛️" },
     { x: 75, y: 25, name: "Pelabuhan Tanjung Perak", icon: "🚢" },
@@ -486,59 +635,35 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
     { x: 25, y: 30, name: "Hutan Mangrove", icon: "🌳" },
   ]
 
-  // Handle zoom controls
-  const handleZoomIn = () => {
-    setZoomLevel((prev) => Math.min(prev + 0.2, 3))
-  }
-
-  const handleZoomOut = () => {
-    setZoomLevel((prev) => Math.max(prev - 0.2, 0.5))
-  }
-
-  // Handle map dragging
+  const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.2, 3))
+  const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 0.2, 0.5))
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return // Only left mouse button
+    if (e.button !== 0) return
     setIsDragging(true)
     setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y })
   }
-
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return
-    setPanOffset({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y,
-    })
+    setPanOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y })
   }
-
-  const handleMouseUp = () => {
-    setIsDragging(false)
-  }
-
-  const handleMouseLeave = () => {
-    setIsDragging(false)
-  }
-
-  // Reset map position
+  const handleMouseUp = () => setIsDragging(false)
+  const handleMouseLeave = () => setIsDragging(false)
   const resetMapPosition = () => {
     setPanOffset({ x: 0, y: 0 })
     setZoomLevel(1)
   }
 
-  // Effect to add event listeners for mouse wheel zoom
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       if (!mapRef.current?.contains(e.target as Node)) return
       e.preventDefault()
-
       const delta = -Math.sign(e.deltaY) * 0.1
       setZoomLevel((prev) => Math.min(Math.max(prev + delta, 0.5), 3))
     }
-
     const mapElement = mapRef.current
     if (mapElement) {
       mapElement.addEventListener("wheel", handleWheel, { passive: false })
     }
-
     return () => {
       if (mapElement) {
         mapElement.removeEventListener("wheel", handleWheel)
@@ -546,7 +671,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
     }
   }, [])
 
-  // Mendapatkan warna berdasarkan tingkat risiko
   const getRiskColor = (riskLevel: string, isHovered = false, isSelected = false) => {
     if (isSelected) {
       return riskLevel === "tinggi"
@@ -555,7 +679,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
           ? "fill-yellow-600 stroke-white stroke-[0.5]"
           : "fill-green-600 stroke-white stroke-[0.5]"
     }
-
     if (isHovered) {
       return riskLevel === "tinggi"
         ? "fill-red-500 stroke-white stroke-[0.5]"
@@ -563,7 +686,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
           ? "fill-yellow-500 stroke-white stroke-[0.5]"
           : "fill-green-500 stroke-white stroke-[0.5]"
     }
-
     return riskLevel === "tinggi"
       ? "fill-red-700/70 hover:fill-red-600"
       : riskLevel === "sedang"
@@ -571,17 +693,19 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
         : "fill-green-700/70 hover:fill-green-600"
   }
 
+  // MODIFIED: Clicking a kecamatan now only changes the *view*, not the locked location.
   const handleKecamatanClick = (kecamatan: KecamatanData) => {
     setSelectedKecamatan(kecamatan)
   }
 
+  // MODIFIED: The confirmation button uses the GPS-locked location if available.
   const handleConfirmSelection = () => {
-    if (selectedKecamatan) {
-      onKecamatanSelected(selectedKecamatan)
+    const finalSelection = gpsLockedKecamatan || selectedKecamatan
+    if (finalSelection) {
+      onKecamatanSelected(finalSelection)
     }
   }
 
-  // Filter kecamatan berdasarkan pencarian dan filter
   const filteredKecamatan = kecamatanData.filter((kecamatan) => {
     const matchesSearch = kecamatan.name.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesRegion = filterRegion === "all" || kecamatan.region === filterRegion
@@ -589,7 +713,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
     return matchesSearch && matchesRegion && matchesRisk
   })
 
-  // Get map background based on theme
   const getMapBackground = () => {
     switch (mapTheme) {
       case "satellite":
@@ -600,8 +723,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
         return "bg-blue-100"
     }
   }
-
-  // Get water color based on theme
   const getWaterColor = () => {
     switch (mapTheme) {
       case "satellite":
@@ -613,7 +734,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
     }
   }
 
-  // Hitung jumlah kecamatan berdasarkan tingkat risiko
   const riskCounts = {
     tinggi: kecamatanData.filter((k) => k.riskLevel === "tinggi").length,
     sedang: kecamatanData.filter((k) => k.riskLevel === "sedang").length,
@@ -645,7 +765,7 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                       key={kecamatan.id}
                       className="p-2 hover:bg-amber-900/30 cursor-pointer flex items-center gap-2"
                       onClick={() => {
-                        setSelectedKecamatan(kecamatan)
+                        handleKecamatanClick(kecamatan) // Use the modified click handler
                         setSearchQuery("")
                       }}
                     >
@@ -698,7 +818,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
           <div className="bg-black/50 rounded-lg p-4 border border-amber-800/30 overflow-hidden">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-amber-400 font-bold">Peta Risiko Rayap Kota Surabaya</h3>
-
               <div className="flex items-center gap-2">
                 <Select
                   value={mapTheme}
@@ -736,10 +855,8 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                   transition: isDragging ? "none" : "transform 0.2s ease-out",
                 }}
               >
-                {/* Map background based on theme */}
+                {/* Map layers (background, water, roads etc.) remain unchanged */}
                 <rect x="0" y="0" width="100" height="100" className={getMapBackground()} />
-
-                {/* Grid lines for professional look */}
                 {mapTheme !== "satellite" && (
                   <g className="opacity-20">
                     {[...Array(10)].map((_, i) => (
@@ -768,8 +885,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     ))}
                   </g>
                 )}
-
-                {/* Water bodies */}
                 {showWaterBodies && (
                   <g>
                     {waterBodies.map((water, index) => (
@@ -781,8 +896,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     ))}
                   </g>
                 )}
-
-                {/* Background daratan Surabaya */}
                 <path
                   d="M5,5 L95,5 L95,95 L5,95 Z"
                   className={
@@ -793,8 +906,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                         : "fill-amber-100/10"
                   }
                 />
-
-                {/* Major roads */}
                 {showRoads && (
                   <g>
                     {majorRoads.map((road, index) => (
@@ -809,14 +920,11 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     ))}
                   </g>
                 )}
-
-                {/* Kecamatan berdasarkan region */}
                 <g>
                   {kecamatanData.map((kecamatan) => {
                     const isFiltered =
                       (filterRegion !== "all" && kecamatan.region !== filterRegion) ||
                       (filterRisk !== "all" && kecamatan.riskLevel !== filterRisk)
-
                     return (
                       <path
                         key={kecamatan.id}
@@ -829,10 +937,10 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                               ? getRiskColor(kecamatan.riskLevel, true, selectedKecamatan?.id === kecamatan.id)
                               : getRiskColor(kecamatan.riskLevel, false, false) + " opacity-30"
                             : getRiskColor(
-                                kecamatan.riskLevel,
-                                hoveredKecamatan === kecamatan.id,
-                                selectedKecamatan?.id === kecamatan.id,
-                              ),
+                              kecamatan.riskLevel,
+                              hoveredKecamatan === kecamatan.id,
+                              selectedKecamatan?.id === kecamatan.id,
+                            ),
                         )}
                         onMouseEnter={() => setHoveredKecamatan(kecamatan.id)}
                         onMouseLeave={() => setHoveredKecamatan(null)}
@@ -841,8 +949,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     )
                   })}
                 </g>
-
-                {/* Borders between kecamatan */}
                 <g>
                   {kecamatanData.map((kecamatan) => (
                     <path
@@ -852,8 +958,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     />
                   ))}
                 </g>
-
-                {/* Landmarks */}
                 {showLandmarks && (
                   <g>
                     {landmarks.map((landmark, index) => (
@@ -886,15 +990,12 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     ))}
                   </g>
                 )}
-
-                {/* Labels untuk kecamatan */}
                 {showLabels && (
                   <g>
                     {kecamatanData.map((kecamatan) => {
                       const isFiltered =
                         (filterRegion !== "all" && kecamatan.region !== filterRegion) ||
                         (filterRisk !== "all" && kecamatan.riskLevel !== filterRisk)
-
                       return (
                         <g key={`label-${kecamatan.id}`} className={isFiltered ? "opacity-30" : "opacity-100"}>
                           <text
@@ -902,7 +1003,7 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                             y={kecamatan.coordinates.y}
                             textAnchor="middle"
                             className={cn(
-                              "fill-white text-[2px] font-bold",
+                              "fill-white text-[2px] font-bold pointer-events-none",
                               hoveredKecamatan === kecamatan.id || selectedKecamatan?.id === kecamatan.id
                                 ? "opacity-100"
                                 : "opacity-70",
@@ -910,27 +1011,54 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                           >
                             {kecamatan.name}
                           </text>
-                          {kecamatan.riskLevel === "tinggi" && (
-                            <circle
-                              cx={kecamatan.coordinates.x + 4}
-                              cy={kecamatan.coordinates.y - 1}
-                              r="0.8"
-                              className="fill-red-500 animate-pulse"
-                            />
-                          )}
                         </g>
                       )
                     })}
                   </g>
                 )}
 
-                {/* Compass rose */}
+                {/* NEW: Visual indicator for GPS locked location */}
+                {isGpsLocked && (
+                  <g>
+                    <circle
+                      cx={gpsLockedKecamatan.coordinates.x}
+                      cy={gpsLockedKecamatan.coordinates.y}
+                      r="2.5"
+                      className="fill-blue-500/30 stroke-white stroke-[0.3]"
+                    >
+                      <animate
+                        attributeName="r"
+                        from="2.5"
+                        to="4"
+                        dur="1.5s"
+                        begin="0s"
+                        repeatCount="indefinite"
+                      />
+                      <animate
+                        attributeName="opacity"
+                        from="1"
+                        to="0"
+                        dur="1.5s"
+                        begin="0s"
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                    <circle
+                      cx={gpsLockedKecamatan.coordinates.x}
+                      cy={gpsLockedKecamatan.coordinates.y}
+                      r="1.5"
+                      className="fill-blue-400 stroke-white stroke-[0.4]"
+                    />
+                  </g>
+                )}
+
+                {/* Map decorations (compass, scale, legend) remain unchanged */}
                 <g transform="translate(85, 15)">
                   <circle cx="0" cy="0" r="5" className="fill-black/40 stroke-amber-500/70 stroke-[0.3]" />
-                  <path d="M0,-4 L1,-1 L0,0 L-1,-1 Z" className="fill-red-500" /> {/* North */}
-                  <path d="M0,4 L1,1 L0,0 L-1,1 Z" className="fill-white" /> {/* South */}
-                  <path d="M4,0 L1,1 L0,0 L1,-1 Z" className="fill-white" /> {/* East */}
-                  <path d="M-4,0 L-1,1 L0,0 L-1,-1 Z" className="fill-white" /> {/* West */}
+                  <path d="M0,-4 L1,-1 L0,0 L-1,-1 Z" className="fill-red-500" />
+                  <path d="M0,4 L1,1 L0,0 L-1,1 Z" className="fill-white" />
+                  <path d="M4,0 L1,1 L0,0 L1,-1 Z" className="fill-white" />
+                  <path d="M-4,0 L-1,1 L0,0 L-1,-1 Z" className="fill-white" />
                   <text x="0" y="-2.5" textAnchor="middle" className="fill-white text-[1.8px] font-bold">
                     U
                   </text>
@@ -944,8 +1072,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     B
                   </text>
                 </g>
-
-                {/* Scale bar */}
                 <g transform="translate(10, 90)">
                   <rect width="20" height="1" className="fill-white" />
                   <rect x="0" y="1" width="1" height="1" className="fill-white" />
@@ -957,8 +1083,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     0 5 10 km
                   </text>
                 </g>
-
-                {/* Legenda */}
                 <g transform="translate(2, 75)">
                   <rect width="20" height="13" rx="1" fill="#000000" fillOpacity="0.7" />
                   <text x="2" y="3" className="fill-white text-[2px]">
@@ -979,7 +1103,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                 </g>
               </svg>
 
-              {/* Map controls */}
               <div className="absolute top-2 right-2 flex flex-col gap-1">
                 <Button
                   variant="outline"
@@ -1007,7 +1130,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                 </Button>
               </div>
 
-              {/* Layer controls */}
               <div className="absolute bottom-2 left-2">
                 <div className="bg-black/70 rounded-md p-1 border border-amber-600/30">
                   <Button
@@ -1019,7 +1141,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                     <Layers className="h-4 w-4" />
                   </Button>
                 </div>
-
                 <AnimatePresence>
                   {showLayers && (
                     <motion.div
@@ -1075,7 +1196,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                 </AnimatePresence>
               </div>
 
-              {/* Hover tooltip */}
               <AnimatePresence>
                 {hoveredKecamatan && !selectedKecamatan && (
                   <motion.div
@@ -1089,7 +1209,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                 )}
               </AnimatePresence>
 
-              {/* Overlay text */}
               <div className="absolute top-2 left-2 bg-black/70 rounded px-2 py-1 text-xs text-amber-400 border border-amber-600/30">
                 Kota Surabaya
               </div>
@@ -1100,7 +1219,6 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                 <span className="mr-2">Zoom: {Math.round(zoomLevel * 100)}%</span>
                 <span>Geser peta dengan mouse</span>
               </div>
-
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -1144,15 +1262,44 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
         </div>
 
         <div className="lg:w-1/3">
+          {/* MODIFIED: The entire right panel is now driven by the new logic */}
           {selectedKecamatan ? (
             <div className="bg-black/50 rounded-lg p-4 border border-amber-800/30 h-full relative">
-              <button
-                onClick={() => setSelectedKecamatan(null)}
-                className="absolute top-2 right-2 text-white/60 hover:text-white"
-                aria-label="Tutup"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              {!isGpsLocked && (
+                <button
+                  onClick={() => setSelectedKecamatan(null)}
+                  className="absolute top-2 right-2 text-white/60 hover:text-white"
+                  aria-label="Tutup"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
+
+              {isGpsLocked && (
+                <>
+                  <div className="bg-blue-900/30 text-blue-300 border border-blue-800/50 text-xs p-2 rounded-md mb-2 flex items-center gap-2">
+                    <LocateFixed className="h-5 w-5 flex-shrink-0" />
+                    <span>
+                      Lokasi Anda terdeteksi di <strong>{gpsLockedKecamatan.name}</strong> dan telah dipilihkan secara
+                      otomatis.
+                    </span>
+                  </div>
+
+                  <div className="text-center text-xs text-white/70 mb-4">
+                    Bukan lokasi Anda?
+                    <Button
+                      variant="link"
+                      className="text-amber-400 p-1 h-auto"
+                      onClick={() => {
+                        setGpsLockedKecamatan(null);
+                        setLocationStatus("idle");
+                      }}
+                    >
+                      Pilih Manual
+                    </Button>
+                  </div>
+                </>
+              )}
 
               <div
                 className={cn(
@@ -1213,41 +1360,42 @@ export default function PetaRisikoSurabaya({ onKecamatanSelected }: PetaRisikoSu
                 <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
                   <Button
                     onClick={handleConfirmSelection}
-                    className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold mt-4"
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold mt-4 disabled:bg-amber-800/50 disabled:text-white/50 disabled:cursor-not-allowed"
+                    disabled={!isGpsLocked && !selectedKecamatan}
+                    aria-label={
+                      isGpsLocked ? `Pilih Lokasi Ini (${gpsLockedKecamatan.name})` : "Pilih Lokasi Ini"
+                    }
                   >
                     <MapPin className="mr-2 h-4 w-4" />
-                    Pilih Lokasi Ini
+                    {isGpsLocked
+                      ? `Pilih ${gpsLockedKecamatan.name}`
+                      : selectedKecamatan
+                        ? `Pilih ${selectedKecamatan.name}`
+                        : "Pilih Lokasi"}
                   </Button>
                 </motion.div>
               </div>
             </div>
           ) : (
-            <div className="bg-black/50 rounded-lg p-4 border border-amber-800/30 h-full flex flex-col items-center justify-center">
+            <div className="bg-black/50 rounded-lg p-4 border border-amber-800/30 h-full flex flex-col items-center justify-center text-center">
               <MapPin className="h-12 w-12 text-amber-500/50 mb-4" />
-              <h3 className="text-lg font-bold text-amber-400 text-center">Pilih Kecamatan</h3>
-              <p className="text-white/70 text-center mt-2">
-                Klik pada salah satu kecamatan di peta untuk memilih lokasi rumah Anda.
-              </p>
-              <div className="mt-4 text-center">
-                <p className="text-xs text-white/60 mb-2">Fitur Peta:</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-white/80">
-                  <div className="flex items-center gap-1">
-                    <ZoomIn className="h-3 w-3 text-amber-500" />
-                    <span>Zoom dengan scroll</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Compass className="h-3 w-3 text-amber-500" />
-                    <span>Geser dengan mouse</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Filter className="h-3 w-3 text-amber-500" />
-                    <span>Filter berdasarkan risiko</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Layers className="h-3 w-3 text-amber-500" />
-                    <span>Tampilkan/sembunyikan layer</span>
-                  </div>
-                </div>
+              <h3 className="text-lg font-bold text-amber-400">
+                {locationStatus === "loading" && "Mendeteksi Lokasi Anda..."}
+                {locationStatus !== "loading" && "Pilih Kecamatan"}
+              </h3>
+              <div className="text-white/70 mt-2">
+                {locationStatus === "loading" && (
+                  <p>Harap tunggu, kami sedang mencoba menentukan lokasi Anda secara otomatis.</p>
+                )}
+                {locationStatus === "permission_denied" && (
+                  <p>Anda menolak izin lokasi. Silakan pilih kecamatan secara manual di peta.</p>
+                )}
+                {locationStatus === "outside_map" && (
+                  <p>Lokasi Anda berada di luar jangkauan peta. Silakan pilih kecamatan terdekat secara manual.</p>
+                )}
+                {(locationStatus === "idle" || (!isGpsLocked && !selectedKecamatan)) && (
+                  <p>Klik pada salah satu kecamatan di peta untuk memilih lokasi rumah Anda.</p>
+                )}
               </div>
             </div>
           )}

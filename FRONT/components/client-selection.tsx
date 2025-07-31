@@ -26,18 +26,29 @@ interface Client {
 
 interface ClientSelectionProps {
   onClientSelected: (client: { id: number | null; name: string }) => void
+  accessToken?: string;
 }
 
-export default function ClientSelection({ onClientSelected }: ClientSelectionProps) {
+export default function ClientSelection({ onClientSelected, accessToken }: ClientSelectionProps) {
   const [open, setOpen] = React.useState(false)
   const [clients, setClients] = React.useState<Client[]>([])
   const [value, setValue] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(true)
 
   React.useEffect(() => {
+    if (!accessToken) return;
     const fetchClients = async () => {
       try {
-        const response = await fetch("https://kalkulatorsnc.my.id/api/clients")
+        // const response = await fetch("https://kalkulatorsnc.my.id/api/clients"), {
+        const response = await fetch("http://localhost:8000/api/clients", {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+          }
+        });
+        if (!response.ok) {
+          throw new Error('Failed to fetch clients from API');
+        }
         const data = await response.json()
         setClients(data)
       } catch (error) {
@@ -48,7 +59,7 @@ export default function ClientSelection({ onClientSelected }: ClientSelectionPro
     }
 
     fetchClients()
-  }, [])
+  }, [accessToken])
 
   const handleSelect = (currentValue: string) => {
     setValue(currentValue === value ? "" : currentValue)
@@ -71,11 +82,11 @@ export default function ClientSelection({ onClientSelected }: ClientSelectionPro
 
   return (
     <div className="flex flex-col items-center justify-center p-8 space-y-8 bg-gray-900/50 rounded-lg">
-        <UserPlus className="h-16 w-16 text-amber-500 mb-4" />
-        <h2 className="text-2xl font-bold text-white text-center">Siapa nama Klien?</h2>
-        <p className="text-gray-400 text-center max-w-md">
-            Ketik untuk mencari klien yang sudah ada, atau masukkan nama baru untuk membuat data klien baru.
-        </p>
+      <UserPlus className="h-16 w-16 text-amber-500 mb-4" />
+      <h2 className="text-2xl font-bold text-white text-center">Siapa nama Klien?</h2>
+      <p className="text-gray-400 text-center max-w-md">
+        Ketik untuk mencari klien yang sudah ada, atau masukkan nama baru untuk membuat data klien baru.
+      </p>
       <div className="w-full max-w-sm space-y-4">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -93,13 +104,13 @@ export default function ClientSelection({ onClientSelected }: ClientSelectionPro
           </PopoverTrigger>
           <PopoverContent className="w-full p-0">
             <Command>
-              <CommandInput 
-                placeholder="Cari nama klien..." 
+              <CommandInput
+                placeholder="Cari nama klien..."
                 onValueChange={(search) => setValue(search)}
               />
-               <CommandList>
+              <CommandList>
                 <CommandEmpty>
-                    {isLoading ? "Memuat..." : "Tidak ada klien ditemukan. Ketik untuk membuat baru."}
+                  {isLoading ? "Memuat..." : "Tidak ada klien ditemukan. Ketik untuk membuat baru."}
                 </CommandEmpty>
                 <CommandGroup>
                   {clients.map((client) => (

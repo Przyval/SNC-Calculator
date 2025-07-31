@@ -9,19 +9,20 @@ class RiskCalculation extends Model
 {
     use HasFactory;
 
-    // Add all the fields from your migration
     protected $fillable = [
         'client_id',
         'user_id',
-        'luasRumah',
+        'luasTanah',
         'umurBangunan',
-        'lokasiRumah',
+        // 'lokasiRumah',
         'materialBangunan',
         'riwayatRayap',
         'tingkatKelembaban',
         'jumlahPerabotKayu',
-        'adaDanauSebelumnya',
-        'jenisTanah',
+        // 'adaDanauSebelumnya',
+        'adaLahanKosongDisekitar',
+        // 'jenisTanah',
+        'jenisLantai',
         'skorRisiko',
         'kategoriRisiko',
         'estimasiKerugian',
@@ -30,18 +31,20 @@ class RiskCalculation extends Model
         'selected_kecamatan_risk_level',
     ];
 
-    public function validationRules(): array
+    public function validationRules()
     {
         return [
-            'luasRumah' => 'required|numeric',
+            'luasTanah' => 'required|numeric',
             'umurBangunan' => 'required|integer',
-            'lokasiRumah' => 'required|string',
+            // 'lokasiRumah' => 'required|string',
             'materialBangunan' => 'required|string',
             'riwayatRayap' => 'required|string',
             'tingkatKelembaban' => 'required|numeric',
             'jumlahPerabotKayu' => 'required|integer',
-            'adaDanauSebelumnya' => 'required|string',
-            'jenisTanah' => 'required|string',
+            // 'adaDanauSebelumnya' => 'required|string',
+            'adaLahanKosongDisekitar' => 'required|string',
+            // 'jenisTanah' => 'required|string',
+            'jenisLantai' => 'required|string',
             'skorRisiko' => 'required|integer',
             'kategoriRisiko' => 'required|string',
             'estimasiKerugian' => 'required|numeric',
@@ -49,14 +52,9 @@ class RiskCalculation extends Model
         ];
     }
 
-    public function validationMessages(): array
+    public function validationMessages()
     {
         return [];
-    }
-
-    public function relations(): array
-    {
-        return ['user', 'clients'];
     }
 
     public function user()

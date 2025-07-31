@@ -10,22 +10,28 @@ class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        $request->validate([
+        $credentials = $request->validate([
             'email' => 'required|email',
             'password' => 'required',
         ]);
 
-        if (! Auth::attempt($request->only('email', 'password'))) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials do not match our records.'],
-            ]);
+        if (!Auth::attempt($credentials)) {
+            return response()->json([
+                'message' => 'The provided credentials do not match our records.'
+            ], 401);
         }
-        return response()->json(Auth::user());
+        $user = Auth::user();
+        $token = $user->createToken('auth-token')->plainTextToken;
+        return response()->json([
+            'user' => $user,
+            'token' => $token
+        ]);
     }
 
     public function logout(Request $request)
     {
-        Auth::guard('web')->logout();
+        $request->user()->currentAccessToken()->delete();
+
         return response()->json(['message' => 'Logged out successfully']);
     }
 }

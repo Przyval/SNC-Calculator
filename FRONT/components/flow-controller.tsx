@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-
+import { useSession } from "next-auth/react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Variants, TargetAndTransition, Transition } from "framer-motion"
@@ -19,29 +19,29 @@ import { motion, AnimatePresence } from "framer-motion"
 
 // Tambahkan import untuk PromoNotification
 import PromoNotification from "@/components/promo-notification"
+import { useRouter } from "next/navigation"
 
 interface PerhitunganDanInspeksi {
   // Property fields
-  luasRumah: number;
+  luasTanah: number;
   umurBangunan: number;
-  lokasiRumah: string;
+  // lokasiRumah: string;
   materialBangunan: string;
   riwayatRayap: string;
   tingkatKelembaban: number;
   jumlahPerabotKayu: number;
-  adaDanauSebelumnya: string;
-  jenisTanah: string;
-  // Calculated fields from API
+  // adaDanauSebelumnya: string;
+  adaLahanKosongDisekitar: string;
+  // jenisTanah: string;
+  jenisLantai: string;
   skorRisiko: number;
   kategoriRisiko: string;
   estimasiKerugian: number;
   rekomendasiLayanan: string;
-  // Cost fields
   biayaPerbaikan: number;
   biayaLayanan: number;
   penghematan: number;
-  // Inspection fields
-  inspectionData: InspectionResult; // Nested inspection data
+  inspectionData: InspectionResult;
 }
 
 
@@ -62,9 +62,9 @@ interface InspectionResult {
   images: { url: string; description: string }[];
   summary: string;
   recommendation: string;
-  method: string;
+  treatment: string;
   status: string;
-  // agentName?: string;
+  agentName?: string;
 }
 interface ClientData {
   id: number | null;
@@ -72,8 +72,8 @@ interface ClientData {
 }
 
 export default function FlowController() {
-  // const { data: session, status } = useSession();
-  // const router = useRouter();
+  const { data: session, status } = useSession();
+  const router = useRouter();
 
   const [currentStep, setCurrentStep] = useState(1)
   const [client, setClient] = useState<ClientData | null>(null)
@@ -90,13 +90,13 @@ export default function FlowController() {
   const [direction, setDirection] = useState(1)
   const [showPromoNotification, setShowPromoNotification] = useState(false)
 
-  // if (status === "loading") {
-  //   return <div>Memuat sesi...</div>;
-  // }
-  // if (status === "unauthenticated") {
-  //   router.push('/login');
-  //   return null;
-  // }
+  if (status === "loading") {
+    return <div>Memuat sesi...</div>;
+  }
+  if (status === "unauthenticated") {
+    router.push('/dashbord/login');
+    return null;
+  }
 
   const formatRupiah = (angka: number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -120,18 +120,18 @@ export default function FlowController() {
 
     setHasilPerhitungan(calcResults);
 
-    // if (client && session?.user) { 
-    //   setInspectionResults({
-    //     ...inspectionData,
-    //     clientName: client.name,
-    //     agentName: session.user.name ?? "Nama Agen Tidak Tersedia",
-    //   });
-    // } else {
+    if (client && session?.user) {
+      setInspectionResults({
+        ...inspectionData,
+        clientName: client.name,
+        agentName: session.user.name ?? "Nama Agen Tidak Tersedia",
+      });
+    } else {
       setInspectionResults({
         ...inspectionData,
         clientName: client?.name,
       });
-    // }
+    }
 
     goToNextStep();
   }
@@ -146,9 +146,9 @@ export default function FlowController() {
   }
 
   const saveDataToDatabase = async () => {
-    if (!client || !hasilPerhitungan || !selectedKecamatan || !inspectionResults) {
-      console.error("Missing data for saving.", { client, hasilPerhitungan, selectedKecamatan, inspectionResults });
-      showPopupMessage("Gagal menyimpan. Data tidak lengkap.", null);
+    if (!client || !hasilPerhitungan || !selectedKecamatan || !inspectionResults || !session?.accessToken) {
+      console.error("Missing data or auth token for saving.", { client, hasilPerhitungan, selectedKecamatan, inspectionResults });
+      showPopupMessage("Gagal menyimpan. Data tidak lengkap atau sesi tidak valid.", null);
       return;
     }
 
@@ -168,11 +168,13 @@ export default function FlowController() {
     };
 
     try {
-      const response = await fetch('https://kalkulatorsnc.my.id/api/risk-calculations', {
+      // const response = await fetch('https://kalkulatorsnc.my.id/api/risk-calculations', {
+      const response = await fetch('http://localhost:8000/api/risk-calculations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'Authorization': `Bearer ${session?.accessToken}`
         },
         body: JSON.stringify(payload),
       });
@@ -239,7 +241,7 @@ export default function FlowController() {
         setClient(null)
         setHasilPerhitungan(null)
         setSelectedKecamatan(null)
-        setInspectionResults(null) // Reset inspection results
+        setInspectionResults(null)
         setIsAnimating(false)
         showPopupMessage("Memulai proses baru", <Home className="h-8 w-8 text-amber-500" />)
       }, 700)
@@ -268,15 +270,21 @@ export default function FlowController() {
           {(() => {
             switch (currentStep) {
               case 1:
-                return <ClientSelection onClientSelected={handleClientSelected} />
+                return <ClientSelection onClientSelected={handleClientSelected} accessToken={session?.accessToken} />
               case 2:
-                // Pass the combined handler to KalkulatorRisiko
-                return <KalkulatorRisiko onHasilPerhitungan={handleHasilPerhitungan} />
+                return <KalkulatorRisiko onHasilPerhitungan={handleHasilPerhitungan} accessToken={session?.accessToken} />
               case 3:
                 return <PetaRisikoSurabaya onKecamatanSelected={handleKecamatanSelected} />
               case 4:
-                // Pass the clean inspectionResults state. No onUpdate is needed.
-                return <InspectionResults inspectionResults={inspectionResults} />
+                return <InspectionResults
+                  inspectionResults={inspectionResults}
+                  fullExportData={{
+                    client,
+                    hasilPerhitungan,
+                    selectedKecamatan,
+                    inspectionResults,
+                  }}
+                />
               case 5:
                 return <LoadingAnalysis onComplete={handleLoadingComplete} />
               case 6:
@@ -308,14 +316,10 @@ export default function FlowController() {
     )
   }
 
-  // The rest of the FlowController component remains the same
-  // (getStepTitle, getStepIcon, JSX for navigation, popup, etc.)
-  // Mendapatkan judul langkah
-  // Update the getStepTitle function to include the new step
   const getStepTitle = () => {
     switch (currentStep) {
       case 1: return "Pilih Klien"
-      case 2: return "Input Data Properti & Inspeksi" // Title updated
+      case 2: return "Input Data Properti & Inspeksi"
       case 3: return "Pilih Lokasi Rumah di Peta"
       case 4: return "Hasil Inspeksi Rayap"
       case 5: return "Analisis AI Sedang Berjalan"
@@ -325,8 +329,6 @@ export default function FlowController() {
     }
   }
 
-  // Mendapatkan ikon langkah
-  // Update the getStepIcon function to include the new step
   const getStepIcon = () => {
     switch (currentStep) {
       case 1: return <User className="h-6 w-6 text-amber-500" />
@@ -340,15 +342,12 @@ export default function FlowController() {
     }
   }
 
-  // Tambahkan fungsi untuk menutup notifikasi promo
   const handleClosePromoNotification = () => {
     setShowPromoNotification(false)
   }
 
   return (
     <div className="space-y-6">
-      {/* Ubah bagian render indikator langkah untuk menambahkan animasi */}
-      {/* Ganti bagian indikator langkah dengan kode berikut: */}
       <div className="bg-black/90 border-l-4 border-yellow-500 p-4 rounded-md shadow-lg">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -399,7 +398,7 @@ export default function FlowController() {
             }}
           ></motion.div>
         </div>
-        {/* Update the step indicators */}
+
         <div className="flex justify-between mt-2">
           {[1, 2, 3, 4, 5, 6, 7].map((step) => (
             <motion.div
@@ -436,11 +435,7 @@ export default function FlowController() {
         </div>
       </div>
 
-      {/* Konten langkah saat ini */}
       <div className="transition-all duration-500 ease-in-out">{renderStep()}</div>
-
-      {/* Ubah tombol navigasi untuk menambahkan animasi */}
-      {/* Ganti bagian tombol navigasi dengan kode berikut: */}
       <div className="flex justify-between">
         <motion.div
           whileHover={{ scale: 1.05, y: -2 }}
@@ -490,8 +485,6 @@ export default function FlowController() {
         )}
       </div>
 
-      {/* Ubah bagian popup untuk menambahkan animasi */}
-      {/* Ganti bagian popup dengan kode berikut: */}
       {showPopup && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
           <motion.div
