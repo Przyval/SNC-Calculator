@@ -83,7 +83,7 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
 
     setIsDownloading(true);
     try {
-      const response = await fetch('dashboard/api/export-inspection', {
+      const response = await fetch('api/export-inspection', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

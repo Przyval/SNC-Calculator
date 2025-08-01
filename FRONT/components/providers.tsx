@@ -8,5 +8,5 @@ interface Props {
 }
 
 export function Providers({ children }: Props) {
-    return <SessionProvider basePath="/dashboard/api/auth">{children}</SessionProvider>
+    return <SessionProvider basePath="/api/auth">{children}</SessionProvider>
 }
