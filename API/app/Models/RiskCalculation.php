@@ -9,28 +9,45 @@ class RiskCalculation extends Model
 {
     use HasFactory;
 
+    // protected $fillable = [
+    //     'client_id',
+    //     'user_id',
+    //     'luasTanah',
+    //     'umurBangunan',
+    //     // 'lokasiRumah',
+    //     'materialBangunan',
+    //     'riwayatRayap',
+    //     'tingkatKelembaban',
+    //     'jumlahPerabotKayu',
+    //     // 'adaDanauSebelumnya',
+    //     'adaLahanKosongDisekitar',
+    //     // 'jenisTanah',
+    //     'jenisLantai',
+    //     'skorRisiko',
+    //     'kategoriRisiko',
+    //     'estimasiKerugian',
+    //     'rekomendasiLayanan',
+    //     'selected_kecamatan_name',
+    //     'selected_kecamatan_risk_level',
+    // ];
     protected $fillable = [
         'client_id',
         'user_id',
-        'luasTanah',
-        'umurBangunan',
-        // 'lokasiRumah',
-        'materialBangunan',
-        'riwayatRayap',
-        'tingkatKelembaban',
-        'jumlahPerabotKayu',
-        // 'adaDanauSebelumnya',
-        'adaLahanKosongDisekitar',
-        // 'jenisTanah',
-        'jenisLantai',
-        'skorRisiko',
-        'kategoriRisiko',
-        'estimasiKerugian',
-        'rekomendasiLayanan',
+        'luas_tanah',
+        'umur_bangunan',
+        'material_bangunan',
+        'riwayat_rayap',
+        'tingkat_kelembaban',
+        'jumlah_perabot_kayu',
+        'ada_lahan_kosong_disekitar',
+        'jenis_lantai',
+        'skor_risiko',
+        'kategori_risiko',
+        'estimasi_kerugian',
+        'rekomendasi_layanan',
         'selected_kecamatan_name',
         'selected_kecamatan_risk_level',
     ];
-
     public function validationRules()
     {
         return [

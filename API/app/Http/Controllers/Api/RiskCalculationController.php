@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
@@ -66,9 +67,14 @@ class RiskCalculationController extends Controller
                         ['name' => $clientData['name']]
                     );
                 }
-                
+
+                $snakeCaseCalculatorResult = [];
+                foreach ($calculatorResult as $key => $value) {
+                    $snakeCaseCalculatorResult[Str::snake($key)] = $value;
+                }
+
                 $riskCalculation = RiskCalculation::create(array_merge(
-                    $calculatorResult,
+                    $snakeCaseCalculatorResult,
                     [
                         'client_id' => $client->id,
                         'user_id' => Auth::id(),
