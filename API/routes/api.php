@@ -15,7 +15,10 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
     Route::get('/clients', [ClientController::class, 'index']);
+    Route::get('/risk-calculations', [RiskCalculationController::class, 'index']);
     Route::post('/risk-calculations', [RiskCalculationController::class, 'store']);
+    Route::post('/export-all-inspections', [RiskCalculationController::class, 'exportAll']);
+    Route::post('/export-single-inspection', [RiskCalculationController::class, 'exportSingle']);
     Route::post('/calculate-risk', [RiskCalculatorController::class, 'calculate']);
     Route::post('/upload-inspection-image', [ImageUploadController::class, 'store']);
     Route::post('/logout', [AuthController::class, 'logout']);

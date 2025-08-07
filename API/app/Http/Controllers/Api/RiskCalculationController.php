@@ -13,14 +13,51 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\AllInspectionsExport;
+use App\Exports\SingleInspectionExport;
+
 class RiskCalculationController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        //
+        $query = RiskCalculation::query();
+        $query->with(['client', 'user', 'inspection.images']);
+        $query->latest();
+
+        if ($request->filled('search')) {
+            $searchTerm = $request->search;
+            $query->where(function ($subQuery) use ($searchTerm) {
+                $subQuery->whereHas('client', function ($q) use ($searchTerm) {
+                    $q->where('name', 'like', "%{$searchTerm}%");
+                })->orWhereHas('user', function ($q) use ($searchTerm) {
+                    $q->where('name', 'like', "%{$searchTerm}%");
+                });
+            });
+        }
+
+        $calculations = $query->paginate(10);
+
+        return response()->json($calculations);
+    }
+
+    public function exportAll()
+    {
+        return Excel::download(new AllInspectionsExport, 'semua_inspeksi.xlsx');
+    }
+
+    public function exportSingle(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:risk_calculations,id',
+        ]);
+
+        $calculation = RiskCalculation::with(['client', 'user', 'inspection.images'])->findOrFail($request->id);
+
+        return Excel::download(new SingleInspectionExport($calculation), 'inspeksi_' . $calculation->client->name . '.xlsx');
     }
 
     /**
