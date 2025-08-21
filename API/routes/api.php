@@ -22,4 +22,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/calculate-risk', [RiskCalculatorController::class, 'calculate']);
     Route::post('/upload-inspection-image', [ImageUploadController::class, 'store']);
     Route::post('/logout', [AuthController::class, 'logout']);
+
+    Route::post('/detect-pest', [ImageUploadController::class, 'detectPest']);
+    Route::post('/locate-pest', [ImageUploadController::class, 'detectAndLocatePest']); 
 });

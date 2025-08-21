@@ -80,37 +80,73 @@ export default function ClientSelection({ onClientSelected, accessToken }: Clien
     }
   }
 
+  const selectedClient = clients.find(
+    (client) => client.name.toLowerCase() === value.toLowerCase()
+  )
+
+  const isNewClient = value && !selectedClient
+
   return (
-    <div className="flex flex-col items-center justify-center p-8 space-y-8 bg-gray-900/50 rounded-lg">
-      <UserPlus className="h-16 w-16 text-amber-500 mb-4" />
-      <h2 className="text-2xl font-bold text-white text-center">Siapa nama Klien?</h2>
-      <p className="text-gray-400 text-center max-w-md">
-        Ketik untuk mencari klien yang sudah ada, atau masukkan nama baru untuk membuat data klien baru.
-      </p>
-      <div className="w-full max-w-sm space-y-4">
+    <div className="flex flex-col items-center justify-center min-h-[60vh] p-4 sm:p-8 space-y-6 sm:space-y-8 bg-black/90 border-l-4 border-yellow-500 rounded-md shadow-lg">
+      <div className="text-center space-y-4">
+        <div className="p-4 bg-amber-500/20 rounded-full w-fit mx-auto">
+          <UserPlus className="h-12 w-12 sm:h-16 sm:w-16 text-amber-500" />
+        </div>
+        <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white">
+          Siapa nama Klien?
+        </h2>
+        <p className="text-gray-400 text-sm sm:text-base max-w-md mx-auto leading-relaxed">
+          Ketik untuk mencari klien yang sudah ada, atau masukkan nama baru untuk membuat data klien baru.
+        </p>
+      </div>
+
+      <div className="w-full max-w-sm sm:max-w-md space-y-4">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               role="combobox"
               aria-expanded={open}
-              className="w-full justify-between text-white border-gray-600 hover:bg-gray-800 hover:text-white"
+              className={cn(
+                "w-full justify-between h-12 sm:h-14 text-left font-medium transition-all duration-200",
+                "bg-gray-800/50 border-gray-600 text-white hover:bg-gray-700/70 hover:border-amber-500/50",
+                "focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500",
+                value && "bg-gray-700/70 border-amber-500/30"
+              )}
             >
-              {value
-                ? clients.find((client) => client.name.toLowerCase() === value.toLowerCase())?.name
-                : "Pilih atau ketik nama klien..."}
-              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              <span className={cn(
+                "truncate",
+                value ? "text-white" : "text-gray-400"
+              )}>
+                {value || "Pilih atau ketik nama klien..."}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-gray-400" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-full p-0">
-            <Command>
+          <PopoverContent className="w-full p-0 bg-gray-800 border-gray-600 shadow-2xl">
+            <Command className="bg-gray-800">
               <CommandInput
                 placeholder="Cari nama klien..."
                 onValueChange={(search) => setValue(search)}
+                className="text-white placeholder:text-gray-400 border-gray-600"
               />
-              <CommandList>
-                <CommandEmpty>
-                  {isLoading ? "Memuat..." : "Tidak ada klien ditemukan. Ketik untuk membuat baru."}
+              <CommandList className="bg-gray-800">
+                <CommandEmpty className="text-gray-400 py-6 text-center text-sm">
+                  {isLoading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-500"></div>
+                      Memuat...
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p>Tidak ada klien ditemukan.</p>
+                      {value && (
+                        <p className="text-amber-400 text-xs">
+                          Tekan "Lanjutkan" untuk membuat klien baru: "{value}"
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </CommandEmpty>
                 <CommandGroup>
                   {clients.map((client) => (
@@ -118,14 +154,15 @@ export default function ClientSelection({ onClientSelected, accessToken }: Clien
                       key={client.id}
                       value={client.name}
                       onSelect={handleSelect}
+                      className="text-white hover:bg-gray-700 cursor-pointer py-3"
                     >
                       <Check
                         className={cn(
-                          "mr-2 h-4 w-4",
+                          "mr-2 h-4 w-4 text-amber-500",
                           value.toLowerCase() === client.name.toLowerCase() ? "opacity-100" : "opacity-0"
                         )}
                       />
-                      {client.name}
+                      <span className="font-medium">{client.name}</span>
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -134,9 +171,47 @@ export default function ClientSelection({ onClientSelected, accessToken }: Clien
           </PopoverContent>
         </Popover>
 
-        <Button onClick={handleContinue} disabled={!value} className="w-full bg-amber-500 hover:bg-amber-600 text-black">
-          Lanjutkan
+        {/* Selected client info */}
+        {value && (
+          <div className="p-4 rounded-lg border transition-all duration-200 bg-gray-800/50 border-gray-600">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold",
+                selectedClient ? "bg-green-500/20 text-green-400" : "bg-amber-500/20 text-amber-400"
+              )}>
+                {selectedClient ? "✓" : "+"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-white truncate">{value}</p>
+                <p className="text-xs text-gray-400">
+                  {selectedClient ? "Klien yang sudah ada" : "Klien baru"}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <Button 
+          onClick={handleContinue} 
+          disabled={!value || isLoading} 
+          className={cn(
+            "w-full h-12 sm:h-14 font-medium text-base transition-all duration-200",
+            "bg-amber-500 hover:bg-amber-600 text-black",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "focus:ring-2 focus:ring-amber-500/30 focus:ring-offset-2 focus:ring-offset-gray-900"
+          )}
+        >
+          {isNewClient ? "Buat Klien Baru & Lanjutkan" : "Lanjutkan"}
         </Button>
+
+        {/* Additional info for new clients */}
+        {isNewClient && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <p className="text-amber-300 text-sm text-center">
+              💡 Klien baru akan dibuat dengan nama "{value}"
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

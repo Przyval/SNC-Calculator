@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Bug, Calculator, Camera, Upload, Trash2, Calendar, Video, XCircle } from "lucide-react"
+import { Bug, Calculator, Camera, Upload, Trash2, Calendar, Video, XCircle, ScanSearch } from "lucide-react"
 import Image from "next/image"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
@@ -50,13 +50,17 @@ interface PerhitunganDanInspeksi {
 }
 
 interface InspectionImage {
-  url: string
-  description: string
+  url: string;
+  description: string;
+  detectedObjects?: {
+    box_2d: [number, number, number, number];
+    label: string;
+  }[];
 }
 
 interface InspectionData {
   dateTime: string;
-  images: { url: string; description: string }[];
+  images: InspectionImage[];
   summary: string;
   recommendation: string;
   treatment: string;
@@ -90,7 +94,7 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
 
   // State untuk data inspeksi
   const [inspectionDate, setInspectionDate] = useState<Date | undefined>(new Date());
-  const [images, setImages] = useState<{ url: string; description: string }[]>([]);
+  const [images, setImages] = useState<InspectionImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,12 +107,13 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
   const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isClient, setIsClient] = useState(false)
+  const [isClient, setIsClient] = useState(false);
+  const [uploadMode, setUploadMode] = useState<'manual' | 'termatrax'>('manual');
 
   useEffect(() => {
     setIsClient(true)
   }, [])
-  
+
   useEffect(() => {
     const originalStyle = window.getComputedStyle(document.body).overflow;
 
@@ -122,30 +127,85 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
     };
   }, [isCameraOpen]);
 
-  const uploadFile = async (file: File) => {
+  const uploadAndAnalyzeImage = async (file: File) => {
     if (!accessToken) {
-      alert("Session expired, please re-login.");
+      alert("Sesi berakhir, silakan login kembali.");
       return;
     }
     setIsUploading(true);
+    const tempId = `temp_${Date.now()}`;
+    setImages(prev => [...prev, { url: URL.createObjectURL(file), description: "Menganalisis...", detectedObjects: [] }]);
+
     const formData = new FormData();
     formData.append('image', file);
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-      const response = await fetch(`${apiUrl}/upload-inspection-image`, {
+      const response = await fetch(`${apiUrl}/locate-pest`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
         body: formData,
       });
 
-      if (!response.ok) throw new Error(`Upload failed with status ${response.statusText}`);
+      if (!response.ok) {
+        if (response.status === 422) {
+          const errorData = await response.json();
+          const errorMessages = Object.values(errorData.errors).flat().join('\n');
+          throw new Error(`Kesalahan Validasi:\n${errorMessages}`);
+        }
+        throw new Error(`Analisis gagal: ${response.statusText}`);
+      }
 
       const result = await response.json();
-      setImages(prev => [...prev, { url: result.url, description: '' }]);
+
+      // Generate a description from the summary
+      let autoDescription = "Tidak ada hama yang terdeteksi secara visual.";
+      if (result.summary && result.summary.length > 0) {
+        autoDescription = "Terdeteksi: " + result.summary.map((s: any) => `${s.count}x ${s.label}`).join(', ') + ".";
+      }
+
+      const newImage: InspectionImage = {
+        url: result.imageUrl,
+        description: autoDescription,
+        detectedObjects: result.detectedObjects || [],
+      };
+
+      // Replace the placeholder with the final result
+      setImages(prev => prev.map(img => img.url.startsWith('blob:') ? newImage : img));
+
+    } catch (error: any) {
+      console.error("Pest location analysis error:", error);
+      alert(error.message);
+      setImages(prev => prev.filter(img => !img.url.startsWith('blob:')));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const uploadManualImage = async (file: File) => {
+    if (!accessToken) {
+      alert("Sesi berakhir, silakan login kembali.");
+      return;
+    }
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('image', file);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${apiUrl}/upload-inspection-image`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
+        body: formData,
+      });
+      if (!response.ok) throw new Error(`Upload failed: ${response.statusText}`);
+      const result = await response.json();
+
+      const newImage: InspectionImage = {
+        url: result.url,
+        description: "", // Manual description
+        detectedObjects: [], // No detection for manual uploads
+      };
+      setImages(prev => [...prev, newImage]);
 
     } catch (error) {
       console.error("Image upload error:", error);
@@ -155,10 +215,16 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
     }
   };
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    uploadFile(file);
+
+    if (uploadMode === 'termatrax') {
+      await uploadAndAnalyzeImage(file);
+    } else {
+      await uploadManualImage(file);
+    }
+
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -211,21 +277,21 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
 
   const handleCapture = () => {
     if (!videoRef.current || !canvasRef.current) return;
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const context = canvas.getContext('2d');
-    context?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-
+    canvas.getContext('2d')?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
     canvas.toBlob(async (blob) => {
       if (blob) {
         const capturedFile = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        await uploadFile(capturedFile);
+        if (uploadMode === 'termatrax') {
+          await uploadAndAnalyzeImage(capturedFile);
+        } else {
+          await uploadManualImage(capturedFile);
+        }
       }
     }, 'image/jpeg');
-
     closeCamera();
   };
 
@@ -344,22 +410,6 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
               </div>
             </div>
 
-            {/* <div>
-            <Label htmlFor="lokasi-rumah" className="text-white">
-              Lokasi Rumah
-            </Label>
-            <Select value={lokasiRumah} onValueChange={setLokasiRumah}>
-              <SelectTrigger id="lokasi-rumah" className="mt-2 bg-black/50 border-amber-600 text-white">
-                <SelectValue placeholder="Pilih lokasi rumah" />
-              </SelectTrigger>
-              <SelectContent className="bg-black text-white border-amber-600">
-                <SelectItem value="dekat-air">Dekat Sungai/Danau/Rawa</SelectItem>
-                <SelectItem value="pinggiran-kota">Pinggiran Kota</SelectItem>
-                <SelectItem value="perkotaan">Perkotaan</SelectItem>
-              </SelectContent>
-            </Select>
-          </div> */}
-
             <div>
               <Label htmlFor="material-bangunan" className="text-white">
                 Material Bangunan
@@ -414,20 +464,6 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
               </div>
             </div>
 
-            {/* <div>
-            <Label htmlFor="ada-danau" className="text-white">
-              Ada Danau, Sungai, atau Rawa Sebelumnya?
-            </Label>
-            <Select value={adaDanauSebelumnya} onValueChange={setAdaDanauSebelumnya}>
-              <SelectTrigger id="ada-danau" className="mt-2 bg-black/50 border-amber-600 text-white">
-                <SelectValue placeholder="Pilih" />
-              </SelectTrigger>
-              <SelectContent className="bg-black text-white border-amber-600">
-                <SelectItem value="ya">Ya</SelectItem>
-                <SelectItem value="tidak">Tidak</SelectItem>
-              </SelectContent>
-            </Select>
-          </div> */}
             <div>
               <Label htmlFor="ada-lahan" className="text-white">
                 Ada Lahan Kosong di sekeliling bangunan?
@@ -443,22 +479,6 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
               </Select>
             </div>
 
-            {/* <div>
-            <Label htmlFor="jenis-tanah" className="text-white">
-              Jenis Tanah di Bawah Rumah
-            </Label>
-            <Select value={jenisTanah} onValueChange={setJenisTanah}>
-              <SelectTrigger id="jenis-tanah" className="mt-2 bg-black/50 border-amber-600 text-white">
-                <SelectValue placeholder="Pilih jenis tanah" />
-              </SelectTrigger>
-              <SelectContent className="bg-black text-white border-amber-600">
-                <SelectItem value="gambut">Tanah Gambut (Organik)</SelectItem>
-                <SelectItem value="berpasir">Tanah Berpasir</SelectItem>
-                <SelectItem value="liat">Tanah Liat</SelectItem>
-                <SelectItem value="berbatu">Tanah Berbatu</SelectItem>
-              </SelectContent>
-            </Select>
-          </div> */}
             <div>
               <Label htmlFor="jenis-lantai" className="text-white">
                 Jenis Lantai
@@ -565,11 +585,42 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
               <div className="mt-2 p-4 border-2 border-dashed border-amber-800/50 rounded-lg">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                   {images.map((image, index) => (
-                    <div key={index} className="relative group">
-                      <Image loader={laravelLoader} src={image.url} alt={`Inspection image ${index + 1}`} width={150} height={150} className="object-cover rounded-md w-full h-32" />
-                      <button onClick={() => removeImage(index)} className="absolute top-1 right-1 bg-red-600/80 p-1 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                    <div key={index} className="space-y-2">
+                      {/* Bounding Box Container */}
+                      <div className="relative group w-full h-32">
+                        <Image
+                          loader={image.url.startsWith('blob:') ? undefined : laravelLoader}
+                          src={image.url}
+                          alt={`Inspection image ${index + 1}`}
+                          fill
+                          className="object-cover rounded-md"
+                        />
+                        {/* Render Bounding Boxes */}
+                        {image.detectedObjects?.map((obj, objIndex) => {
+                          const [ymin, xmin, ymax, xmax] = obj.box_2d;
+                          const boxStyle = {
+                            top: `${ymin / 10}%`,
+                            left: `${xmin / 10}%`,
+                            width: `${(xmax - xmin) / 10}%`,
+                            height: `${(ymax - ymin) / 10}%`,
+                          };
+                          return (
+                            <div
+                              key={objIndex}
+                              className="absolute border-2 border-red-500 group-hover:bg-red-500/20 transition-colors"
+                              style={boxStyle}
+                            >
+                              <span className="absolute -top-5 left-0 text-xs bg-black/70 text-white px-1 rounded-sm whitespace-nowrap">
+                                {obj.label}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        <button onClick={() => removeImage(index)} className="absolute top-1 right-1 bg-red-600/80 p-1 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+
                       <Textarea
                         placeholder="Deskripsi singkat..."
                         value={image.description}
@@ -581,14 +632,30 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
                   ))}
                 </div>
                 <Input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" disabled={isUploading} />
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="w-full bg-amber-600 hover:bg-amber-700 text-black font-bold">
+                <div className="grid sm:grid-cols-3 gap-4">
+                  <Button
+                    onClick={() => { setUploadMode('manual'); fileInputRef.current?.click(); }}
+                    disabled={isUploading}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-black font-bold"
+                  >
                     <Upload className="h-4 w-4 mr-2" />
-                    {isUploading ? "Mengunggah..." : "Unggah Foto"}
+                    {isUploading && uploadMode === 'manual' ? "..." : "Unggah Foto"}
                   </Button>
-                  <Button onClick={openCamera} disabled={isUploading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold">
-                    <Video className="h-4 w-4 mr-2" />
-                    {isUploading ? "Tunggu..." : "Ambil Foto"}
+                  <Button
+                    onClick={() => { setUploadMode('manual'); openCamera(); }}
+                    disabled={isUploading}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                  >
+                    <Camera className="h-4 w-4 mr-2" />
+                    Ambil Foto
+                  </Button>
+                  <Button
+                    onClick={() => { setUploadMode('termatrax'); fileInputRef.current?.click(); }} // You can also link this to openCamera
+                    disabled={isUploading}
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold"
+                  >
+                    <ScanSearch className="h-4 w-4 mr-2" />
+                    {isUploading && uploadMode === 'termatrax' ? "..." : "Termatrax"}
                   </Button>
                 </div>
               </div>

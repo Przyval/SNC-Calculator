@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2 } from "lucide-react"
+import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2, Mail, MessageCircle, Copy, Check } from "lucide-react"
 import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
@@ -26,24 +26,19 @@ interface InspectionResultData {
 }
 
 interface ClientData { id: number | null; name: string; }
-interface PerhitunganData {   // Property fields
+interface PerhitunganData {   
   luasTanah: number;
   umurBangunan: number;
-  // lokasiRumah: string;
   materialBangunan: string;
   riwayatRayap: string;
   tingkatKelembaban: number;
   jumlahPerabotKayu: number;
-  // adaDanauSebelumnya: string;
   adaLahanKosongDisekitar: string;
-  // jenisTanah: string;
   jenisLantai: string;
-  // Calculated fields from API
   skorRisiko: number;
   kategoriRisiko: string;
   estimasiKerugian: number;
   rekomendasiLayanan: string;
-  // Cost fields
   biayaPerbaikan: number;
   biayaLayanan: number;
   penghematan: number;
@@ -58,7 +53,6 @@ interface FullExportData {
 
 interface InspectionResultsProps {
   inspectionResults: InspectionResultData | null;
-  // Add the new prop here
   fullExportData: FullExportData;
 }
 
@@ -71,13 +65,200 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
   const [activeIndex, setActiveIndex] = useState(0)
   const [isZoomed, setIsZoomed] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // THIS IS THE CORRECTED DOWNLOAD HANDLER
+  // Print functionality
+  const handlePrint = () => {
+    // Create print styles
+    const printStyles = `
+      <style>
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .print-content, .print-content * {
+            visibility: visible;
+          }
+          .print-content {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-page-break {
+            page-break-before: always;
+          }
+          .print-image-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+          }
+          .print-image-item {
+            break-inside: avoid;
+            margin-bottom: 15px;
+          }
+          .print-image-item img {
+            max-width: 100%;
+            height: auto;
+            max-height: 200px;
+            object-fit: contain;
+          }
+          .print-header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+          }
+          .print-section {
+            margin: 15px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+          }
+          .print-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+          }
+          @page {
+            margin: 1in;
+            size: A4;
+          }
+        }
+      </style>
+    `;
+
+    // Create printable content
+    const printContent = `
+      ${printStyles}
+      <div class="print-content">
+        <div class="print-header">
+          <h1>HASIL INSPEKSI RAYAP</h1>
+          <p>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</p>
+        </div>
+        
+        <div class="print-info-grid">
+          <div class="print-section">
+            <h3>Informasi Inspeksi</h3>
+            <p><strong>Nama Klien:</strong> ${inspectionResults?.clientName || '-'}</p>
+            <p><strong>Jam/Tanggal:</strong> ${inspectionResults?.dateTime || '-'}</p>
+            <p><strong>Metode:</strong> ${inspectionResults?.treatment || '-'}</p>
+            <p><strong>Diinput oleh:</strong> ${inspectionResults?.agentName || '-'}</p>
+          </div>
+          
+          <div class="print-section">
+            <h3>Ringkasan Temuan</h3>
+            <p><strong>Jumlah Foto:</strong> ${inspectionResults?.images?.length || 0}</p>
+            <p><strong>Status:</strong> ${inspectionResults?.status || '-'}</p>
+            <p><strong>Rekomendasi:</strong> ${getRecommendationSummary(inspectionResults?.status || '')}</p>
+          </div>
+        </div>
+
+        <div class="print-section">
+          <h3>Kesimpulan & Rekomendasi</h3>
+          <p style="white-space: pre-line;">${inspectionResults?.summary || ''}</p>
+          <div style="margin-top: 15px; padding: 10px; background-color: #f5f5f5;">
+            <h4>Opsi Penanganan Lanjutan:</h4>
+            <p style="white-space: pre-line;">${inspectionResults?.recommendation || ''}</p>
+          </div>
+        </div>
+
+        ${inspectionResults?.images && inspectionResults.images.length > 0 ? `
+          <div class="print-page-break">
+            <div class="print-section">
+              <h3>Dokumentasi Foto Inspeksi</h3>
+              <div class="print-image-grid">
+                ${inspectionResults.images.map((image, index) => `
+                  <div class="print-image-item">
+                    <img src="${laravelLoader({ src: image.url })}" alt="Inspeksi ${index + 1}" />
+                    <p><strong>Foto ${index + 1}:</strong> ${image.description || 'Tidak ada deskripsi'}</p>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // Open print window
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Hasil Inspeksi Rayap - ${inspectionResults?.clientName}</title>
+          <meta charset="utf-8">
+        </head>
+        <body>
+          ${printContent}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      
+      // Wait for images to load then print
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          printWindow.close();
+        }, 500);
+      };
+    }
+  };
+
+  // Share functionality
+  const generateShareText = () => {
+    return `🔍 *HASIL INSPEKSI RAYAP*
+
+👤 *Klien:* ${inspectionResults?.clientName || '-'}
+📅 *Tanggal:* ${inspectionResults?.dateTime || '-'}
+📊 *Status:* ${inspectionResults?.status || '-'}
+🔧 *Metode:* ${inspectionResults?.treatment || '-'}
+👨‍💼 *Agent:* ${inspectionResults?.agentName || '-'}
+
+📝 *Kesimpulan:*
+${inspectionResults?.summary || ''}
+
+💡 *Rekomendasi:*
+${inspectionResults?.recommendation || ''}
+
+📸 Dokumentasi: ${inspectionResults?.images?.length || 0} foto terlampir
+
+---
+Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
+  };
+
+  const shareToWhatsApp = () => {
+    const text = encodeURIComponent(generateShareText());
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
+  const shareToEmail = () => {
+    const subject = encodeURIComponent(`Hasil Inspeksi Rayap - ${inspectionResults?.clientName}`);
+    const body = encodeURIComponent(generateShareText());
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+  };
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(generateShareText());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
+
   const handleDownload = async () => {
-    // Check if the full data object is available
     if (!fullExportData || !fullExportData.client || !fullExportData.inspectionResults) {
       console.error("Cannot download: Data is incomplete.", fullExportData);
-      // Optionally, show an error to the user
       return;
     }
 
@@ -145,6 +326,7 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
       default: return "-";
     }
   }
+
   return (
     <Card className="p-6 bg-black/90 border-l-4 border-yellow-500 text-white shadow-lg">
       <div className="flex items-center justify-between gap-2 mb-6">
@@ -153,11 +335,19 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
           <h2 className="text-xl md:text-2xl font-bold headline">HASIL INSPEKSI RAYAP</h2>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="border-amber-600 text-amber-500"><Printer className="h-4 w-4 mr-1" />Cetak</Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black"
+            onClick={handlePrint}
+          >
+            <Printer className="h-4 w-4 mr-1" />
+            Cetak
+          </Button>
           <Button
             variant="outline"
             size="sm"
-            className="border-amber-600 text-amber-500"
+            className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black"
             onClick={handleDownload}
             disabled={isDownloading}
           >
@@ -168,9 +358,59 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
             )}
             Unduh
           </Button>
-          <Button variant="outline" size="sm" className="border-amber-600 text-amber-500"><Share2 className="h-4 w-4 mr-1" />Bagikan</Button>
+          <div className="relative">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black"
+              onClick={() => setShowShareMenu(!showShareMenu)}
+            >
+              <Share2 className="h-4 w-4 mr-1" />
+              Bagikan
+            </Button>
+            
+            {showShareMenu && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                <div className="py-1">
+                  <button
+                    onClick={shareToWhatsApp}
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2 text-green-600" />
+                    WhatsApp
+                  </button>
+                  <button
+                    onClick={shareToEmail}
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    <Mail className="h-4 w-4 mr-2 text-blue-600" />
+                    Email
+                  </button>
+                  <button
+                    onClick={copyToClipboard}
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 mr-2 text-green-600" />
+                    ) : (
+                      <Copy className="h-4 w-4 mr-2 text-gray-600" />
+                    )}
+                    {copied ? 'Tersalin!' : 'Salin Teks'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Click outside to close share menu */}
+      {showShareMenu && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setShowShareMenu(false)}
+        />
+      )}
 
       <div className="bg-amber-900/20 p-4 rounded-md border border-amber-800/30 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -204,10 +444,10 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
                 </div>
               </motion.div>
             </AnimatePresence>
-            <Button variant="outline" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500" onClick={prevSlide}><ChevronLeft className="h-6 w-6" /></Button>
-            <Button variant="outline" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500" onClick={nextSlide}><ChevronRight className="h-6 w-6" /></Button>
-            <Button variant="outline" size="icon" className="absolute right-2 top-2 bg-black/80 border-amber-500" onClick={toggleZoom}><ZoomIn className="h-5 w-5" /></Button>
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 z-10">
+            <Button variant="outline" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500 no-print" onClick={prevSlide}><ChevronLeft className="h-6 w-6" /></Button>
+            <Button variant="outline" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500 no-print" onClick={nextSlide}><ChevronRight className="h-6 w-6" /></Button>
+            <Button variant="outline" size="icon" className="absolute right-2 top-2 bg-black/80 border-amber-500 no-print" onClick={toggleZoom}><ZoomIn className="h-5 w-5" /></Button>
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 z-10 no-print">
               {inspectionResults.images.map((_, index) => (<button key={index} onClick={() => setActiveIndex(index)} className={`w-2 h-2 rounded-full ${index === activeIndex ? "bg-amber-500" : "bg-gray-600"}`} />))}
             </div>
           </div>
@@ -215,7 +455,7 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
             <h3 className="font-bold text-amber-400">Deskripsi Gambar {activeIndex + 1}</h3>
             <p className="text-white/90 whitespace-pre-line">{inspectionResults.images[activeIndex]?.description || 'Tidak ada deskripsi.'}</p>
           </div>
-          <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2">
+          <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2 no-print">
             {inspectionResults.images.map((image, index) => (
               <div key={image.url + index} className={cn("relative h-16 rounded-md overflow-hidden cursor-pointer border-2", activeIndex === index ? "border-amber-500" : "border-transparent hover:border-amber-500/50")} onClick={() => setActiveIndex(index)}>
                 <Image loader={laravelLoader} src={image.url || "/placeholder.svg"} alt={`Thumbnail ${index + 1}`} fill sizes="10vw" className="object-cover" />
