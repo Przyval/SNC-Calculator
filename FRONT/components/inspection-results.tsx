@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2, Mail, MessageCircle, Copy, Check } from "lucide-react"
+import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2, Mail, MessageCircle, Copy, Check, FileText } from "lucide-react"
 import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
@@ -26,9 +26,10 @@ interface InspectionResultData {
 }
 
 interface ClientData { id: number | null; name: string; }
-interface PerhitunganData {   
+interface PerhitunganData {
   luasTanah: number;
   umurBangunan: number;
+  lokasiRumah: string;
   materialBangunan: string;
   riwayatRayap: string;
   tingkatKelembaban: number;
@@ -54,6 +55,7 @@ interface FullExportData {
 interface InspectionResultsProps {
   inspectionResults: InspectionResultData | null;
   fullExportData: FullExportData;
+  accessToken?: string;
 }
 
 const laravelLoader = ({ src }: { src: string }) => {
@@ -61,12 +63,15 @@ const laravelLoader = ({ src }: { src: string }) => {
   return `${laravelUrl}${src}`;
 };
 
-export default function InspectionResults({ inspectionResults, fullExportData }: InspectionResultsProps) {
+export default function InspectionResults({ inspectionResults, fullExportData, accessToken }: InspectionResultsProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [isZoomed, setIsZoomed] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [isDownloadingProposal, setIsDownloadingProposal] = useState(false);
+
 
   // Print functionality
   const handlePrint = () => {
@@ -202,7 +207,7 @@ export default function InspectionResults({ inspectionResults, fullExportData }:
         </html>
       `);
       printWindow.document.close();
-      
+
       // Wait for images to load then print
       printWindow.onload = () => {
         setTimeout(() => {
@@ -293,6 +298,111 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
     }
   };
 
+
+  const fetchProposalFile = async () => {
+    if (!inspectionResults || !fullExportData.client || !accessToken) {
+      throw new Error("Data tidak lengkap atau sesi tidak valid.");
+    }
+
+    const apiPayload = {
+      service_type: inspectionResults.treatment.toLowerCase(),
+      client_name: fullExportData.client.name,
+      address: fullExportData.hasilPerhitungan?.lokasiRumah || "N/A",
+      area_treatment: fullExportData.hasilPerhitungan?.luasTanah || 100,
+      images: inspectionResults.images.map(img => ({
+        description: img.description,
+        paths: [img.url]
+      }))
+    };
+
+    const laravelApiUrl = process.env.NEXT_PUBLIC_LARAVEL_API_URL || 'http://localhost:8000';
+    const fullUrl = `${laravelApiUrl}/api/generate-propose`;
+
+    // Debug logging
+    console.log('Making request to:', fullUrl);
+    console.log('Payload:', apiPayload);
+    console.log('Access token exists:', !!accessToken);
+
+    try {
+      const response = await fetch(fullUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+        body: JSON.stringify(apiPayload),
+      });
+
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+      console.log('Response ok:', response.ok);
+
+      if (!response.ok) {
+        // Get the actual response text for debugging
+        const errorText = await response.text();
+        console.error('Error response text:', errorText);
+        throw new Error(`Gagal membuat proposal: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const blob = await response.blob();
+      console.log('Blob size:', blob.size);
+      console.log('Blob type:', blob.type);
+
+      const filename = `Proposal_${apiPayload.client_name.replace(/ /g, '_')}.docx`;
+      return { blob, filename };
+    } catch (error) {
+      console.error('Fetch error:', error);
+      throw error;
+    }
+  };
+
+  const handleShareProposal = async () => {
+    setIsSharing(true);
+    setShowShareMenu(false);
+    try {
+      const { blob, filename } = await fetchProposalFile();
+      const file = new File([blob], filename, { type: blob.type });
+
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Proposal Penawaran - ${fullExportData.client?.name}`,
+          text: `Berikut adalah proposal penawaran untuk ${fullExportData.client?.name}.`,
+        });
+      } else {
+        alert("Browser Anda tidak mendukung fitur berbagi file. Gunakan tombol 'Unduh Proposal' sebagai gantinya.");
+      }
+    } catch (error) {
+      console.error("Gagal membagikan proposal:", error);
+      alert(`Terjadi kesalahan saat membagikan proposal: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  // NEW: Function for the dedicated download button
+  const handleDownloadProposal = async () => {
+    setIsDownloadingProposal(true);
+    try {
+      const { blob, filename } = await fetchProposalFile();
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Gagal mengunduh proposal:", error);
+      alert(`Terjadi kesalahan saat mengunduh proposal: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsDownloadingProposal(false);
+    }
+  };
+
   const nextSlide = () => {
     if (!inspectionResults || inspectionResults.images.length === 0) return;
     setActiveIndex((current) => (current === inspectionResults.images.length - 1 ? 0 : current + 1))
@@ -335,9 +445,9 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
           <h2 className="text-xl md:text-2xl font-bold headline">HASIL INSPEKSI RAYAP</h2>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black"
             onClick={handlePrint}
           >
@@ -358,20 +468,48 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
             )}
             Unduh
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-purple-600 text-purple-500 hover:bg-purple-500 hover:text-black"
+            onClick={handleDownloadProposal}
+            disabled={isDownloadingProposal}
+          >
+            {isDownloadingProposal ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}
+            Unduh Proposal
+          </Button>
+
           <div className="relative">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black"
               onClick={() => setShowShareMenu(!showShareMenu)}
+              disabled={isSharing} // NEW: Disable button while sharing
             >
-              <Share2 className="h-4 w-4 mr-1" />
+              {isSharing ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Share2 className="h-4 w-4 mr-1" />
+              )}
               Bagikan
             </Button>
-            
+
             {showShareMenu && (
-              <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                 <div className="py-1">
+                  <button
+                    onClick={handleShareProposal}
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 font-medium"
+                  >
+                    <FileText className="h-4 w-4 mr-2 text-purple-600" />
+                    Bagikan Proposal (.docx)
+                  </button>
+
+                  <div className="border-t my-1"></div>
+
+                  <p className="px-4 pt-2 pb-1 text-xs text-gray-500">Bagikan Teks Ringkasan:</p>
                   <button
                     onClick={shareToWhatsApp}
                     className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -406,8 +544,8 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
 
       {/* Click outside to close share menu */}
       {showShareMenu && (
-        <div 
-          className="fixed inset-0 z-40" 
+        <div
+          className="fixed inset-0 z-40"
           onClick={() => setShowShareMenu(false)}
         />
       )}

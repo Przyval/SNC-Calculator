@@ -13,7 +13,7 @@ class RiskCalculatorController extends Controller
         $data = $request->validate([
             'luasTanah' => 'required|numeric',
             'umurBangunan' => 'required|numeric',
-            // 'lokasiRumah' => 'required|string',
+            'lokasiRumah' => 'required|string',
             'materialBangunan' => 'required|string',
             'riwayatRayap' => 'required|string',
             'tingkatKelembaban' => 'required|numeric',

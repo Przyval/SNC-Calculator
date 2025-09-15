@@ -44,6 +44,7 @@ return new class extends Migration {
             // Renamed from camelCase to snake_case
             $table->float('luas_tanah');
             $table->integer('umur_bangunan');
+            $table->string('lokasi_rumah');
             $table->string('material_bangunan');
             $table->string('riwayat_rayap');
             $table->float('tingkat_kelembaban');

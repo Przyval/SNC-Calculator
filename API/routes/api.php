@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\ImageUploadController;
 use App\Http\Controllers\Api\RiskCalculationController;
 // use App\Http\Controllers\Api\SocialiteController;
+use App\Http\Controllers\ProposalController;
 use App\Http\Controllers\RiskCalculatorController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
@@ -24,5 +25,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
 
     Route::post('/detect-pest', [ImageUploadController::class, 'detectPest']);
-    Route::post('/locate-pest', [ImageUploadController::class, 'detectAndLocatePest']); 
+    Route::post('/locate-pest', [ImageUploadController::class, 'detectAndLocatePest']);
+
+    Route::post('/generate-propose', [ProposalController::class, 'generate']);
 });

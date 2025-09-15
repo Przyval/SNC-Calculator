@@ -25,7 +25,7 @@ interface PerhitunganDanInspeksi {
   // Property fields
   luasTanah: number;
   umurBangunan: number;
-  // lokasiRumah: string;
+  lokasiRumah: string;
   materialBangunan: string;
   riwayatRayap: string;
   tingkatKelembaban: number;
@@ -284,6 +284,7 @@ export default function FlowController() {
                     selectedKecamatan,
                     inspectionResults,
                   }}
+                  accessToken={session?.accessToken}
                 />
               // case 5:
               //   return <LoadingAnalysis onComplete={handleLoadingComplete} />

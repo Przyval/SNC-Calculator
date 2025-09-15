@@ -21,13 +21,14 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { id } from "date-fns/locale"
 import { createPortal } from "react-dom"
+import { log } from "console"
 
 // Combined interface for all data passed up
 interface PerhitunganDanInspeksi {
   // Property fields
   luasTanah: number;
   umurBangunan: number;
-  // lokasiRumah: string;
+  lokasiRumah: string;
   materialBangunan: string;
   riwayatRayap: string;
   tingkatKelembaban: number;
@@ -82,7 +83,7 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
   // State untuk data properti
   const [luasTanah, setLuasTanah] = useState<number>(100)
   const [umurBangunan, setUmurBangunan] = useState<number>(5)
-  // const [lokasiRumah, setLokasiRumah] = useState<string>("perkotaan")
+  const [lokasiRumah, setLokasiRumah] = useState<string>("")
   const [materialBangunan, setMaterialBangunan] = useState<string>("Sebagian Kayu")
   const [riwayatRayap, setRiwayatRayap] = useState<string>("tidak")
   const [tingkatKelembaban, setTingkatKelembaban] = useState<number>(50)
@@ -298,6 +299,7 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
   const hitungRisiko = async () => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+      console.log(accessToken)
       const response = await fetch(`${apiUrl}/calculate-risk`, {
         method: "POST",
         headers: {
@@ -305,7 +307,7 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
           'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify({
-          luasTanah, umurBangunan, materialBangunan, riwayatRayap,
+          luasTanah, umurBangunan, lokasiRumah, materialBangunan, riwayatRayap,
           tingkatKelembaban, jumlahPerabotKayu, adaLahanKosongDisekitar, jenisLantai,
         }),
       });
@@ -330,7 +332,7 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
 
       onHasilPerhitungan({
         // Data properti
-        luasTanah, umurBangunan, materialBangunan, riwayatRayap,
+        luasTanah, umurBangunan, lokasiRumah, materialBangunan, riwayatRayap,
         tingkatKelembaban, jumlahPerabotKayu, adaLahanKosongDisekitar, jenisLantai,
         // Hasil kalkulasi
         skorRisiko: data.skorRisiko,
@@ -406,6 +408,18 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
                   value={umurBangunan}
                   onChange={(e) => setUmurBangunan(Number(e.target.value))}
                   className="w-20 bg-black/50 border-amber-600 text-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="lokasi-rumah" className="text-white">
+                Alamat
+              </Label>
+              <div className="flex items-center mt-2">
+                <Input
+                  onChange={(e) => setLokasiRumah(e.target.value)}
+                  className="w-full bg-black/50 border-amber-600 text-white"
                 />
               </div>
             </div>
@@ -540,9 +554,10 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
                   <SelectTrigger id="inspection-treatment" className="mt-2 bg-black/50 border-amber-600"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-black text-white border-amber-600">
                     <SelectItem value="Smart System">Smart System</SelectItem>
-                    <SelectItem value="Inject Spraying">Inject Spraying</SelectItem>
+                    <SelectItem value="Inject_Spraying">Inject Spraying</SelectItem>
                     <SelectItem value="Baiting">Baiting</SelectItem>
                     <SelectItem value="Spraying">Spraying</SelectItem>
+                    <SelectItem value="Pipanasi">Pipanasi</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
