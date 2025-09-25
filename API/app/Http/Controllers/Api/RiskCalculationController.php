@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\RiskCalculation;
+use App\Services\ExcelCalculationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,9 @@ use App\Exports\SingleInspectionExport;
 
 class RiskCalculationController extends Controller
 {
+    public function __construct(private ExcelCalculationService $calculationService)
+    {
+    }
     /**
      * Display a listing of the resource.
      */
@@ -65,16 +69,24 @@ class RiskCalculationController extends Controller
      */
     public function store(Request $request)
     {
+        Log::info($request->all());
         $riskCalculationModel = new RiskCalculation();
         $prefixedCalculatorRules = collect($riskCalculationModel->validationRules())
             ->mapWithKeys(fn($rules, $field) => ['calculatorResult.' . $field => $rules])
             ->all();
-
+        $newCalculatorRules = [
+            'calculatorResult.transport' => 'required|in:mobil,motor',
+            'calculatorResult.jarakTempuh' => 'required|numeric',
+            'calculatorResult.jumlahLantai' => 'required|integer',
+            'calculatorResult.monitoringPerBulan' => 'required|integer',
+            'calculatorResult.preparationSet' => 'present|array',
+            'calculatorResult.additionalSet' => 'present|array',
+        ];
         $otherRules = [
             'client.id' => 'nullable|integer|exists:clients,id',
             'client.name' => 'required|string|max:255',
-            'kecamatan.name' => 'required|string|max:255',
-            'kecamatan.riskLevel' => ['required', 'string', Rule::in(['rendah', 'sedang', 'tinggi'])],
+            // 'kecamatan.name' => 'required|string|max:255',
+            // 'kecamatan.riskLevel' => ['required', 'string', Rule::in(['rendah', 'sedang', 'tinggi'])],
             'inspection' => 'required|array',
             'inspection.dateTime' => 'required|string',
             'inspection.agentName' => 'nullable|string',
@@ -86,37 +98,52 @@ class RiskCalculationController extends Controller
             'inspection.images.*.url' => 'required|string',
             'inspection.images.*.description' => 'nullable|string',
         ];
-
-        $request->validate(array_merge($prefixedCalculatorRules, $otherRules));
+        $request->validate(array_merge($prefixedCalculatorRules, $newCalculatorRules, $otherRules));
 
         try {
             $result = DB::transaction(function () use ($request) {
                 $clientData = $request->input('client');
                 $calculatorResult = $request->input('calculatorResult');
-                $kecamatanData = $request->input('kecamatan');
+                // $kecamatanData = $request->input('kecamatan');
                 $inspectionData = $request->input('inspection');
-                $client = null;
+                $dataForPriceCalc = [
+                    'client_name' => $clientData['name'],
+                    'address' => $calculatorResult['lokasiRumah'],
+                    'luasTanah' => $calculatorResult['luasTanah'],
+                    'jumlahLantai' => $calculatorResult['jumlahLantai'],
+                    'jarakTempuh' => $calculatorResult['jarakTempuh'],
+                    'transport' => $calculatorResult['transport'],
+                    'monitoringPerBulan' => $calculatorResult['monitoringPerBulan'],
+                    'preparationSet' => $calculatorResult['preparationSet'],
+                    'additionalSet' => $calculatorResult['additionalSet'],
+                ];
+                $finalPrice = $this->calculationService->getCalculatedPrice($dataForPriceCalc);
+                $finalPriceRaw = round($finalPrice);
 
-                if (!empty($clientData['id'])) {
-                    $client = Client::findOrFail($clientData['id']);
-                } else {
-                    $client = Client::firstOrCreate(
-                        ['name' => $clientData['name']]
-                    );
-                }
+                $client = Client::firstOrCreate(['name' => $clientData['name']]);
+
+                // if (!empty($clientData['id'])) {
+                //     $client = Client::findOrFail($clientData['id']);
+                // } else {
+                //     $client = Client::firstOrCreate(
+                //         ['name' => $clientData['name']]
+                //     );
+                // }
 
                 $snakeCaseCalculatorResult = [];
                 foreach ($calculatorResult as $key => $value) {
-                    $snakeCaseCalculatorResult[Str::snake($key)] = $value;
+                    if (is_scalar($value)) {
+                        $snakeCaseCalculatorResult[Str::snake($key)] = $value;
+                    }
                 }
-
+                $snakeCaseCalculatorResult['final_price'] = $finalPriceRaw;
                 $riskCalculation = RiskCalculation::create(array_merge(
                     $snakeCaseCalculatorResult,
                     [
                         'client_id' => $client->id,
                         'user_id' => Auth::id(),
-                        'selected_kecamatan_name' => $kecamatanData['name'],
-                        'selected_kecamatan_risk_level' => $kecamatanData['riskLevel'],
+                        // 'selected_kecamatan_name' => $kecamatanData['name'],
+                        // 'selected_kecamatan_risk_level' => $kecamatanData['riskLevel'],
                     ]
                 ));
                 $inspection = $riskCalculation->inspection()->create([

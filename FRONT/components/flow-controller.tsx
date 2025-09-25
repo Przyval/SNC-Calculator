@@ -53,14 +53,14 @@ interface PerhitunganDanInspeksi {
 
 
 // Tipe data untuk data kecamatan
-interface KecamatanData {
-  id: string
-  name: string
-  riskLevel: "tinggi" | "sedang" | "rendah"
-  affectedHomes: number
-  totalHomes: number
-  description: string
-}
+// interface KecamatanData {
+//   id: string
+//   name: string
+//   riskLevel: "tinggi" | "sedang" | "rendah"
+//   affectedHomes: number
+//   totalHomes: number
+//   description: string
+// }
 
 // Updated InspectionResult type to match what's coming from the calculator
 interface InspectionResult {
@@ -89,7 +89,7 @@ export default function FlowController() {
   const [hasilPerhitungan, setHasilPerhitungan] = useState<Omit<PerhitunganDanInspeksi, 'inspectionData'> | null>(null);
   const [inspectionResults, setInspectionResults] = useState<InspectionResult | null>(null)
 
-  const [selectedKecamatan, setSelectedKecamatan] = useState<KecamatanData | null>(null)
+  // const [selectedKecamatan, setSelectedKecamatan] = useState<KecamatanData | null>(null)
   const [showPopup, setShowPopup] = useState(false)
   const [popupMessage, setPopupMessage] = useState("")
   const [popupIcon, setPopupIcon] = useState<React.ReactNode | null>(null)
@@ -143,18 +143,18 @@ export default function FlowController() {
     goToNextStep();
   }
 
-  const handleKecamatanSelected = (kecamatan: KecamatanData) => {
-    setSelectedKecamatan(kecamatan)
-    showPopupMessage(`Anda memilih Kecamatan ${kecamatan.name}`, <MapPin className="h-8 w-8 text-amber-500" />)
+  // const handleKecamatanSelected = (kecamatan: KecamatanData) => {
+  //   setSelectedKecamatan(kecamatan)
+  //   showPopupMessage(`Anda memilih Kecamatan ${kecamatan.name}`, <MapPin className="h-8 w-8 text-amber-500" />)
 
-    setTimeout(() => {
-      goToNextStep()
-    }, 1500)
-  }
+  //   setTimeout(() => {
+  //     goToNextStep()
+  //   }, 1500)
+  // }
 
   const saveDataToDatabase = async () => {
-    if (!client || !hasilPerhitungan || !selectedKecamatan || !inspectionResults || !session?.accessToken) {
-      console.error("Missing data or auth token for saving.", { client, hasilPerhitungan, selectedKecamatan, inspectionResults });
+    if (!client || !hasilPerhitungan || !inspectionResults || !session?.accessToken) {
+      console.error("Missing data or auth token for saving.", { client, hasilPerhitungan, inspectionResults });
       showPopupMessage("Gagal menyimpan. Data tidak lengkap atau sesi tidak valid.", null);
       return;
     }
@@ -167,10 +167,10 @@ export default function FlowController() {
         name: client.name,
       },
       calculatorResult: { ...hasilPerhitungan },
-      kecamatan: {
-        name: selectedKecamatan.name,
-        riskLevel: selectedKecamatan.riskLevel,
-      },
+      // kecamatan: {
+      //   name: selectedKecamatan.name,
+      //   riskLevel: selectedKecamatan.riskLevel,
+      // },
       inspection: inspectionPayload,
     };
 
@@ -210,16 +210,16 @@ export default function FlowController() {
   }
 
   const goToNextStep = () => {
-    if (currentStep < 6 && !isAnimating) {
+    if (currentStep < 3 && !isAnimating) {
       setIsAnimating(true)
       setDirection(1)
       setTimeout(() => {
         const nextStep = currentStep + 1
         setCurrentStep(nextStep)
         setIsAnimating(false)
-        if (nextStep === 6 && selectedKecamatan) {
-          setTimeout(() => setShowPromoNotification(true), 1000)
-        }
+        // if (nextStep === 6 && selectedKecamatan) {
+        //   setTimeout(() => setShowPromoNotification(true), 1000)
+        // }
       }, 700)
     }
   }
@@ -244,7 +244,7 @@ export default function FlowController() {
         setCurrentStep(1)
         setClient(null)
         setHasilPerhitungan(null)
-        setSelectedKecamatan(null)
+        // setSelectedKecamatan(null)
         setInspectionResults(null)
         setIsAnimating(false)
         showPopupMessage("Memulai proses baru", <Home className="h-8 w-8 text-amber-500" />)
@@ -277,41 +277,40 @@ export default function FlowController() {
                 return <ClientSelection onClientSelected={handleClientSelected} accessToken={session?.accessToken} />
               case 2:
                 return <KalkulatorRisiko onHasilPerhitungan={handleHasilPerhitungan} accessToken={session?.accessToken} />
+              // case 3:
+                // return <PetaRisikoSurabaya onKecamatanSelected={handleKecamatanSelected} />
               case 3:
-                return <PetaRisikoSurabaya onKecamatanSelected={handleKecamatanSelected} />
-              case 4:
                 return <InspectionResults
                   inspectionResults={inspectionResults}
                   fullExportData={{
                     client,
                     hasilPerhitungan,
-                    selectedKecamatan,
                     inspectionResults,
                   }}
                   accessToken={session?.accessToken}
                 />
               // case 5:
               //   return <LoadingAnalysis onComplete={handleLoadingComplete} />
-              case 5:
-                return hasilPerhitungan ? (
-                  <PerbandinganHarga
-                    biayaPerbaikan={hasilPerhitungan.biayaPerbaikan}
-                    biayaLayanan={hasilPerhitungan.biayaLayanan}
-                    penghematan={hasilPerhitungan.penghematan}
-                    formatRupiah={formatRupiah}
-                  />
-                ) : null
-              case 6:
-                return selectedKecamatan && hasilPerhitungan ? (
-                  <CombinedPromos
-                    riskLevel={selectedKecamatan.riskLevel}
-                    kecamatanName={selectedKecamatan.name}
-                    biayaPerbaikan={hasilPerhitungan.biayaPerbaikan}
-                    biayaLayanan={hasilPerhitungan.biayaLayanan}
-                    penghematan={hasilPerhitungan.penghematan}
-                    formatRupiah={formatRupiah}
-                  />
-                ) : null
+              // case 5:
+              //   return hasilPerhitungan ? (
+              //     <PerbandinganHarga
+              //       biayaPerbaikan={hasilPerhitungan.biayaPerbaikan}
+              //       biayaLayanan={hasilPerhitungan.biayaLayanan}
+              //       penghematan={hasilPerhitungan.penghematan}
+              //       formatRupiah={formatRupiah}
+              //     />
+              //   ) : null
+              // case 6:
+              //   return selectedKecamatan && hasilPerhitungan ? (
+              //     <CombinedPromos
+              //       riskLevel={selectedKecamatan.riskLevel}
+              //       kecamatanName={selectedKecamatan.name}
+              //       biayaPerbaikan={hasilPerhitungan.biayaPerbaikan}
+              //       biayaLayanan={hasilPerhitungan.biayaLayanan}
+              //       penghematan={hasilPerhitungan.penghematan}
+              //       formatRupiah={formatRupiah}
+              //     />
+              //   ) : null
               default:
                 return null
             }
@@ -325,11 +324,11 @@ export default function FlowController() {
     switch (currentStep) {
       case 1: return "Pilih Klien"
       case 2: return "Input Data Properti & Inspeksi"
-      case 3: return "Pilih Lokasi Rumah di Peta"
-      case 4: return "Hasil Inspeksi Rayap"
+      // case 3: return "Pilih Lokasi Rumah di Peta"
+      case 3: return "Hasil Inspeksi Rayap"
       // case 5: return "Analisis AI Sedang Berjalan"
-      case 5: return "Perbandingan Biaya"
-      case 6: return "Promo Spesial untuk Anda"
+      // case 5: return "Perbandingan Biaya"
+      // case 6: return "Promo Spesial untuk Anda"
       default: return ""
     }
   }
@@ -338,11 +337,11 @@ export default function FlowController() {
     switch (currentStep) {
       case 1: return <User className="h-6 w-6 text-amber-500" />
       case 2: return <Home className="h-6 w-6 text-amber-500" />
-      case 3: return <MapPin className="h-6 w-6 text-amber-500" />
-      case 4: return <Camera className="h-6 w-6 text-amber-500" />
+      // case 3: return <MapPin className="h-6 w-6 text-amber-500" />
+      case 3: return <Camera className="h-6 w-6 text-amber-500" />
       // case 5: return <Calculator className="h-6 w-6 text-amber-500" />
-      case 5: return <Banknote className="h-6 w-6 text-amber-500" />
-      case 6: return <Gift className="h-6 w-6 text-amber-500" />
+      // case 5: return <Banknote className="h-6 w-6 text-amber-500" />
+      // case 6: return <Gift className="h-6 w-6 text-amber-500" />
       default: return null
     }
   }
@@ -384,15 +383,15 @@ export default function FlowController() {
               }}
               className="text-xl font-bold headline text-white"
             >
-              Langkah {currentStep} dari 6: {getStepTitle()}
+              Langkah {currentStep} dari 3: {getStepTitle()}
             </motion.h2>
           </div>
         </div>
         <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
           <motion.div
             className="bg-amber-500 h-full"
-            initial={{ width: `${((currentStep - 1) / 6) * 100}%` }}
-            animate={{ width: `${(currentStep / 6) * 100}%` }}
+            initial={{ width: `${((currentStep - 1) / 3) * 100}%` }}
+            animate={{ width: `${(currentStep / 3) * 100}%` }}
             transition={{
               type: "spring",
               stiffness: 100,
@@ -405,7 +404,7 @@ export default function FlowController() {
         </div>
 
         <div className="flex justify-between mt-2">
-          {[1, 2, 3, 4, 5, 6].map((step) => (
+          {[1, 2, 3].map((step) => (
             <motion.div
               key={step}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${step === currentStep
@@ -450,7 +449,7 @@ export default function FlowController() {
           <Button
             variant="outline"
             onClick={goToPrevStep}
-            disabled={currentStep === 1 || currentStep === 4 || isAnimating}
+            // disabled={currentStep === 1 || currentStep === 4 || isAnimating}
             className="border-amber-500 text-amber-500 hover:bg-amber-500 hover:text-black"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -465,15 +464,15 @@ export default function FlowController() {
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
           >
             <Button
-              onClick={currentStep < 6 ? goToNextStep : restartProcess}
+              onClick={currentStep < 3 ? goToNextStep : restartProcess}
               disabled={
                 (currentStep === 2 && !hasilPerhitungan) ||
-                (currentStep === 3 && !selectedKecamatan) ||
+                // (currentStep === 3 && !selectedKecamatan) ||
                 isAnimating
               }
               className="bg-amber-500 hover:bg-amber-600 text-black"
             >
-              {currentStep < 6 ? (
+              {currentStep < 3 ? (
                 <>
                   Lanjut
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -528,13 +527,13 @@ export default function FlowController() {
           </motion.div>
         </div>
       )}
-      {showPromoNotification && selectedKecamatan && (
+      {/* {showPromoNotification && selectedKecamatan && (
         <PromoNotification
           riskLevel={selectedKecamatan.riskLevel}
           kecamatanName={selectedKecamatan.name}
           onClose={handleClosePromoNotification}
         />
-      )}
+      )} */}
     </div>
   )
 }

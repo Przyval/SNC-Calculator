@@ -55,7 +55,7 @@ interface KecamatanData { id: string; name: string; riskLevel: "tinggi" | "sedan
 interface FullExportData {
   client: ClientData | null;
   hasilPerhitungan: PerhitunganData | null;
-  selectedKecamatan: KecamatanData | null;
+  // selectedKecamatan: KecamatanData | null;
   inspectionResults: InspectionResultData | null;
 }
 

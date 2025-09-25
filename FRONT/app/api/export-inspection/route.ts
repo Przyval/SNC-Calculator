@@ -15,10 +15,10 @@ function getSupportedExtension(url: string): 'jpeg' | 'png' | 'gif' {
 export async function POST(request: NextRequest) {
     try {
         const data = await request.json();
-        if (!data.inspectionResults || !data.hasilPerhitungan || !data.client || !data.selectedKecamatan) {
+        if (!data.inspectionResults || !data.hasilPerhitungan || !data.client) {
             return new NextResponse('Incomplete data provided for export', { status: 400 });
         }
-        const { client, hasilPerhitungan, selectedKecamatan, inspectionResults } = data;
+        const { client, hasilPerhitungan, inspectionResults } = data;
         const workbook = new Workbook();
         const worksheet = workbook.addWorksheet('Inspection Result');
 
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
         const inspectionInfo = [ { label: 'Nama Klien', value: client.name }, { label: 'Jam/Tanggal', value: inspectionResults.dateTime }, { label: 'Metode', value: inspectionResults.treatment }, { label: 'Diinput oleh', value: inspectionResults.agentName }, { label: 'Status', value: inspectionResults.status }, { label: 'Ringkasan Temuan', value: inspectionResults.summary }, { label: 'Rekomendasi Penanganan', value: inspectionResults.recommendation }, ];
         let rowA = 3;
         inspectionInfo.forEach(item => { worksheet.getCell(`A${rowA}`).value = { richText: [{ text: item.label, font: { bold: true } }] }; worksheet.getCell(`A${rowA}`).style = headerStyle; const valueCell = worksheet.getCell(`A${rowA + 1}`); valueCell.value = item.value; valueCell.style = cellStyle; rowA += 2; });
-        const riskInfo = [ { label: 'Luas Tanah', value: `${hasilPerhitungan.luasTanah} m²` }, { label: 'Umur Bangunan', value: `${hasilPerhitungan.umurBangunan} tahun` }, { label: 'Material Bangunan', value: hasilPerhitungan.materialBangunan }, { label: 'Riwayat Rayap', value: hasilPerhitungan.riwayatRayap }, { label: 'Tingkat Kelembaban', value: `${hasilPerhitungan.tingkatKelembaban}%` }, { label: 'Jumlah Perabot Kayu', value: hasilPerhitungan.jumlahPerabotKayu }, { label: 'Lahan Kosong Disekitar', value: hasilPerhitungan.adaLahanKosongDisekitar }, { label: 'Jenis Lantai', value: hasilPerhitungan.jenisLantai }, { label: 'Kecamatan Terpilih', value: selectedKecamatan.name }, { label: 'Tingkat Risiko Kecamatan', value: selectedKecamatan.riskLevel }, { label: 'Skor Risiko', value: hasilPerhitungan.skorRisiko }, { label: 'Kategori Risiko', value: hasilPerhitungan.kategoriRisiko }, { label: 'Estimasi Kerugian', value: `Rp ${new Intl.NumberFormat('id-ID').format(hasilPerhitungan.estimasiKerugian)}` }, { label: 'Rekomendasi Layanan', value: hasilPerhitungan.rekomendasiLayanan }, ];
+        const riskInfo = [ { label: 'Luas Tanah', value: `${hasilPerhitungan.luasTanah} m²` }, { label: 'Umur Bangunan', value: `${hasilPerhitungan.umurBangunan} tahun` }, { label: 'Material Bangunan', value: hasilPerhitungan.materialBangunan }, { label: 'Riwayat Rayap', value: hasilPerhitungan.riwayatRayap }, { label: 'Tingkat Kelembaban', value: `${hasilPerhitungan.tingkatKelembaban}%` }, { label: 'Jumlah Perabot Kayu', value: hasilPerhitungan.jumlahPerabotKayu }, { label: 'Lahan Kosong Disekitar', value: hasilPerhitungan.adaLahanKosongDisekitar }, { label: 'Jenis Lantai', value: hasilPerhitungan.jenisLantai }, { label: 'Skor Risiko', value: hasilPerhitungan.skorRisiko }, { label: 'Kategori Risiko', value: hasilPerhitungan.kategoriRisiko }, { label: 'Estimasi Kerugian', value: `Rp ${new Intl.NumberFormat('id-ID').format(hasilPerhitungan.estimasiKerugian)}` }, { label: 'Rekomendasi Layanan', value: hasilPerhitungan.rekomendasiLayanan }, ];
         let rowB = 3;
         riskInfo.forEach(item => { worksheet.getCell(`B${rowB}`).value = { richText: [{ text: item.label, font: { bold: true } }] }; worksheet.getCell(`B${rowB}`).style = headerStyle; const valueCell = worksheet.getCell(`B${rowB + 1}`); valueCell.value = item.value; valueCell.style = cellStyle; rowB += 2; });
         

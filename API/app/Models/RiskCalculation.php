@@ -46,8 +46,13 @@ class RiskCalculation extends Model
         'kategori_risiko',
         'estimasi_kerugian',
         'rekomendasi_layanan',
-        'selected_kecamatan_name',
-        'selected_kecamatan_risk_level',
+        // 'selected_kecamatan_name',
+        // 'selected_kecamatan_risk_level',
+        'transport',
+        'jarak_tempuh',
+        'jumlah_lantai',
+        'monitoring_per_bulan',
+        'final_price',
     ];
     public function validationRules()
     {

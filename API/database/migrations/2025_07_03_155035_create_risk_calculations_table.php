@@ -10,32 +10,6 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        // Schema::create('risk_calculations', function (Blueprint $table) {
-        //     $table->id();
-        //     $table->foreignId('client_id')->constrained()->onDelete('cascade');
-        //     $table->foreignId('user_id')->constrained()->onDelete('cascade');
-        //     $table->float('luasTanah');
-        //     $table->integer('umurBangunan');
-        //     // $table->string('lokasiRumah'); buang
-        //     $table->string('materialBangunan');
-        //     $table->string('riwayatRayap');
-        //     $table->float('tingkatKelembaban');
-        //     $table->integer('jumlahPerabotKayu');
-        //     // $table->string('adaDanauSebelumnya');
-        //     $table->string('adaLahanKosongDisekitar');
-        //     // $table->string('jenisTanah');
-        //     $table->string('jenisLantai');
-
-        //     // Calculated fields
-        //     $table->integer('skorRisiko');
-        //     $table->string('kategoriRisiko');
-        //     $table->bigInteger('estimasiKerugian');
-        //     $table->string('rekomendasiLayanan');
-
-        //     $table->string('selected_kecamatan_name');
-        //     $table->string('selected_kecamatan_risk_level');
-        //     $table->timestamps();
-        // });
         Schema::create('risk_calculations', function (Blueprint $table) {
             $table->id();
             $table->foreignId('client_id')->constrained()->onDelete('cascade');
@@ -58,9 +32,11 @@ return new class extends Migration {
             $table->bigInteger('estimasi_kerugian');
             $table->string('rekomendasi_layanan');
 
-            // These were already correct, left as is
-            $table->string('selected_kecamatan_name');
-            $table->string('selected_kecamatan_risk_level');
+            $table->string('transport');
+            $table->float('jarak_tempuh');
+            $table->integer('jumlah_lantai');
+            $table->integer('monitoring_per_bulan');
+            $table->bigInteger('final_price')->comment('The calculated final price from the Excel service, stored as a whole number.');
             $table->timestamps();
         });
     }
