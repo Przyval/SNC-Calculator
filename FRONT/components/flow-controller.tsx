@@ -42,6 +42,13 @@ interface PerhitunganDanInspeksi {
   biayaLayanan: number;
   penghematan: number;
   inspectionData: InspectionResult;
+
+  transport: 'mobil' | 'motor';
+  jarakTempuh: number;
+  jumlahLantai: number;
+  monitoringPerBulan: number;
+  preparationSet: Record<string, number>;
+  additionalSet: Record<string, number>;
 }
 
 
@@ -194,9 +201,6 @@ export default function FlowController() {
       showPopupMessage(`Gagal menyimpan data: ${error}`, null);
     }
   };
-
-
-  const handleLoadingComplete = () => goToNextStep()
 
   const showPopupMessage = (message: string, icon: React.ReactNode) => {
     setPopupMessage(message)

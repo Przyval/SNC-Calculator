@@ -22,6 +22,7 @@ import { format } from "date-fns"
 import { id } from "date-fns/locale"
 import { createPortal } from "react-dom"
 import { log } from "console"
+import { Checkbox } from "@/components/ui/checkbox"
 
 // Combined interface for all data passed up
 interface PerhitunganDanInspeksi {
@@ -48,6 +49,13 @@ interface PerhitunganDanInspeksi {
   penghematan: number;
   // Inspection fields
   inspectionData: InspectionData;
+
+  transport: 'mobil' | 'motor';
+  jarakTempuh: number;
+  jumlahLantai: number;
+  monitoringPerBulan: number;
+  preparationSet: Record<string, number>;
+  additionalSet: Record<string, number>;
 }
 
 interface InspectionImage {
@@ -78,6 +86,31 @@ const laravelLoader = ({ src }: { src: string }) => {
   return `${laravelUrl}${src}`;
 };
 
+const preparationSetItems = [
+  "Agadi Treatent per Liter Larutan",
+  "Expose Soil Treatent per Liter Larutan",
+  "Xterm AG Station",
+  "Xterm IG Station",
+  "Expose Wood Treatent per Liter Larutan",
+  "Queen Killer",
+  "Mata Bor kayu 2mm",
+  "Mata Bor kayu 3mm",
+  "Mata bor Hilti 6mm",
+  "Mata Bor Hilti 8mm",
+  "Mata Bor Hilti 10mm",
+  "Semen Warna",
+  "Premium",
+  "Oli Fastron 10W-40SL",
+  "Jarum B&G",
+];
+
+const additionalSetItems = [
+  "Masker untuk Klien",
+  "Company Profile",
+  "Laporan/SPK/Surat/Kontrak",
+  "BAP",
+  "LOG BOOK",
+];
 
 export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: KalkulatorRisikoProps) {
   // State untuk data properti
@@ -92,6 +125,42 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
   const [adaLahanKosongDisekitar, setAdaLahanKosongDisekitar] = useState<string>("tidak")
   // const [jenisTanah, setJenisTanah] = useState<string>("liat")
   const [jenisLantai, setJenisLantai] = useState<string>("SPC")
+  const [transport, setTransport] = useState<'mobil' | 'motor'>('mobil');
+  const [jarakTempuh, setJarakTempuh] = useState<number>(0);
+  const [jumlahLantai, setJumlahLantai] = useState<number>(1);
+  const [monitoringPerBulan, setMonitoringPerBulan] = useState<number>(1);
+  const [selectedPreparation, setSelectedPreparation] = useState<Record<string, number>>({});
+  const [selectedAdditional, setSelectedAdditional] = useState<Record<string, number>>({});
+
+  const handleSetCheckChange = (
+    item: string,
+    checked: boolean | 'indeterminate',
+    setter: React.Dispatch<React.SetStateAction<Record<string, number>>>
+  ) => {
+    setter(prev => {
+      const newSet = { ...prev };
+      if (checked) {
+        newSet[item] = 1;
+      } else {
+        delete newSet[item];
+      }
+      return newSet;
+    });
+  };
+
+  const handleSetQuantityChange = (
+    item: string,
+    quantity: string,
+    setter: React.Dispatch<React.SetStateAction<Record<string, number>>>
+  ) => {
+    const numQuantity = parseInt(quantity, 10);
+    if (!isNaN(numQuantity) && numQuantity >= 0) {
+      setter(prev => ({
+        ...prev,
+        [item]: numQuantity,
+      }));
+    }
+  };
 
   // State untuk data inspeksi
   const [inspectionDate, setInspectionDate] = useState<Date | undefined>(new Date());
@@ -309,6 +378,9 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
         body: JSON.stringify({
           luasTanah, umurBangunan, lokasiRumah, materialBangunan, riwayatRayap,
           tingkatKelembaban, jumlahPerabotKayu, adaLahanKosongDisekitar, jenisLantai,
+          transport, jarakTempuh, jumlahLantai, monitoringPerBulan,
+          preparationSet: selectedPreparation,
+          additionalSet: selectedAdditional,
         }),
       });
 
@@ -340,6 +412,9 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
         estimasiKerugian: data.estimasiKerugian,
         rekomendasiLayanan: data.rekomendasiLayanan,
         biayaPerbaikan, biayaLayanan, penghematan,
+        transport, jarakTempuh, jumlahLantai, monitoringPerBulan,
+        preparationSet: selectedPreparation,
+        additionalSet: selectedAdditional,
         // Data inspeksi
         inspectionData: {
           dateTime: format(inspectionDate || new Date(), "EEEE, dd MMMM yyyy 'pukul' HH.mm", { locale: id }),
@@ -538,6 +613,109 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
           </div>
         </div>
 
+        <div className="border-t-2 border-dashed border-amber-800/50 my-8"></div>
+        <div>
+          <Label htmlFor="transport" className="text-white">Transportasi</Label>
+          <Select
+            value={transport}
+            onValueChange={(value) => setTransport(value as 'mobil' | 'motor')}
+          >
+            <SelectTrigger id="transport" className="mt-2 bg-black/50 border-amber-600 text-white">
+              <SelectValue placeholder="Pilih transportasi" />
+            </SelectTrigger>
+            <SelectContent className="bg-black text-white border-amber-600">
+              <SelectItem value="mobil">Mobil</SelectItem>
+              <SelectItem value="motor">Motor</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label htmlFor="jarak-tempuh" className="text-white">Jarak Tempuh (km)</Label>
+          <div className="flex items-center gap-4 mt-2">
+            <Slider min={0} max={500} step={5} value={[jarakTempuh]} onValueChange={(v) => setJarakTempuh(v[0])} />
+            <Input type="number" value={jarakTempuh} onChange={(e) => setJarakTempuh(Number(e.target.value))} className="w-20 bg-black/50 border-amber-600" />
+          </div>
+        </div>
+
+        <div>
+          <Label htmlFor="jumlah-lantai" className="text-white">Jumlah Lantai</Label>
+          <div className="flex items-center gap-4 mt-2">
+            <Slider min={1} max={10} step={1} value={[jumlahLantai]} onValueChange={(v) => setJumlahLantai(v[0])} />
+            <Input type="number" value={jumlahLantai} onChange={(e) => setJumlahLantai(Number(e.target.value))} className="w-20 bg-black/50 border-amber-600" />
+          </div>
+        </div>
+
+        <div>
+          <Label htmlFor="monitoring-per-bulan" className="text-white">Monitoring (Bulan)</Label>
+          <div className="flex items-center gap-4 mt-2">
+            <Slider min={1} max={12} step={1} value={[monitoringPerBulan]} onValueChange={(v) => setMonitoringPerBulan(v[0])} />
+            <Input type="number" value={monitoringPerBulan} onChange={(e) => setMonitoringPerBulan(Number(e.target.value))} className="w-20 bg-black/50 border-amber-600" />
+          </div>
+        </div>
+
+        <div>
+          <Label className="text-white text-lg font-semibold">Preparation Set</Label>
+          <p className="text-sm text-white/70 mb-3">Pilih item dan tentukan jumlah yang dibutuhkan.</p>
+          <div className="space-y-3 max-h-60 overflow-y-auto p-3 bg-black/40 rounded-md">
+            {preparationSetItems.map((item) => (
+              <div key={item} className="flex items-center justify-between space-x-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id={item}
+                    checked={item in selectedPreparation}
+                    onCheckedChange={(checked) => handleSetCheckChange(item, checked, setSelectedPreparation)}
+                    className="border-amber-400"
+                  />
+                  <label htmlFor={item} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    {item}
+                  </label>
+                </div>
+                <Input
+                  type="number"
+                  min="1"
+                  value={selectedPreparation[item] || ''}
+                  onChange={(e) => handleSetQuantityChange(item, e.target.value, setSelectedPreparation)}
+                  disabled={!(item in selectedPreparation)}
+                  className="w-20 bg-black/50 border-amber-600 h-8 text-white disabled:opacity-50"
+                  placeholder="Qty"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Updated UI for Additional Set */}
+        <div>
+          <Label className="text-white text-lg font-semibold">Additional Set</Label>
+          <p className="text-sm text-white/70 mb-3">Pilih item tambahan dan tentukan jumlah.</p>
+          <div className="space-y-3 p-3 bg-black/40 rounded-md">
+            {additionalSetItems.map((item) => (
+              <div key={item} className="flex items-center justify-between space-x-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id={item}
+                    checked={item in selectedAdditional}
+                    onCheckedChange={(checked) => handleSetCheckChange(item, checked, setSelectedAdditional)}
+                    className="border-amber-400"
+                  />
+                  <label htmlFor={item} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    {item}
+                  </label>
+                </div>
+                <Input
+                  type="number"
+                  min="1"
+                  value={selectedAdditional[item] || ''}
+                  onChange={(e) => handleSetQuantityChange(item, e.target.value, setSelectedAdditional)}
+                  disabled={!(item in selectedAdditional)}
+                  className="w-20 bg-black/50 border-amber-600 h-8 text-white disabled:opacity-50"
+                  placeholder="Qty"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="border-t-2 border-dashed border-amber-800/50 my-8"></div>
 
         {/* Inspection Input Section */}

@@ -4,16 +4,66 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Intervention\Image\Laravel\Facades\Image;
 use PhpOffice\PhpWord\TemplateProcessor;
+use App\Services\ExcelCalculationService;
 
 class ProposalController extends Controller
 {
+    public function __construct(private ExcelCalculationService $calculationService)
+    {
+    }
     public function generate(Request $request)
     {
+        Log::info($request->all());
+        $rules = [
+            'client_name' => 'required|string',
+            'address' => 'required|string',
+            'service_type' => 'required|string',
+            'area_treatment' => 'required|numeric',
+            'floor_count' => 'required|integer',
+            'distance_km' => 'required|numeric',
+            'transport' => 'required|in:mobil,motor',
+            'monitoring_duration_months' => 'required|integer',
+            'preparation_set_items' => 'present|array',
+            'additional_set_items' => 'present|array',
+            'images' => 'nullable|array',
+        ];
+        $validator = Validator::make($request->all(), $rules);
+        if ($validator->fails()) {
+            Log::error('Proposal generation validation failed.', $validator->errors()->toArray());
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+        $validated = $validator->validated();
+        $serviceDataForCalculation = [
+            'luasTanah' => $validated['area_treatment'],
+            'jarakTempuh' => $validated['distance_km'],
+            'jumlahLantai' => $validated['floor_count'],
+            'monitoringPerBulan' => $validated['monitoring_duration_months'],
+            'preparationSet' => $validated['preparation_set_items'],
+            'additionalSet' => $validated['additional_set_items'],
+            'client_name' => $validated['client_name'],
+            'address' => $validated['address'],
+            'transport' => $validated['transport'],
+        ];
+        $finalPrice = 0;
+        try {
+            $finalPrice = $this->calculationService->getCalculatedPrice($serviceDataForCalculation);
+            Log::info('Successfully calculated final price from Excel service: ' . $finalPrice);
+        } catch (\Exception $e) {
+            Log::error('Could not calculate price from Excel Service: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to calculate the price from the backend engine.'], 500);
+        }
+        $roundedPrice = round($finalPrice);
+        $validated['final_price_raw'] = $roundedPrice;
+        $validated['final_price'] = 'Rp ' . number_format($roundedPrice, 0, ',', '.');
         $proposalType = $request->get('proposal_type', 'pest_control');
-        $serviceType = $request->get('service_type', 'pipanasi');
-
+        $serviceType = in_array($validated['service_type'], ['pipanasi', 'inject_spraying', 'spraying'])
+            ? $validated['service_type'] : 'spraying';
         $templatePath = storage_path("app/templates/{$serviceType}.docx");
 
         if (!file_exists($templatePath)) {
@@ -22,20 +72,15 @@ class ProposalController extends Controller
 
         $template = new TemplateProcessor($templatePath);
 
-        // Fill general attributes
-        $this->fillGeneralAttributes($template, $request);
+        $this->fillGeneralAttributes($template, $validated);
 
-        // Fill service-specific attributes
-        $this->fillServiceSpecificAttributes($template, $serviceType, $request);
+        $this->fillServiceSpecificAttributes($template, $serviceType, $validated);
 
-        // Handle steps/images
-        $this->processImages($template, $request);
+        $this->processImages($template, $validated['images'] ?? []);
 
-        // Generate output filename
-        $outputFilename = $this->generateOutputFilename($proposalType, $serviceType, $request->get('client_name', 'client'));
+        $outputFilename = $this->generateOutputFilename($proposalType, $serviceType, $validated['client_name']);
         $outputPath = storage_path("app/generated/{$outputFilename}");
 
-        // Ensure directory exists
         if (!file_exists(dirname($outputPath))) {
             mkdir(dirname($outputPath), 0755, true);
         }
@@ -45,16 +90,20 @@ class ProposalController extends Controller
         return response()->download($outputPath)->deleteFileAfterSend(true);
     }
 
-    private function fillGeneralAttributes($template, $request)
+    private function fillGeneralAttributes(TemplateProcessor $template, array $data)
     {
+        $luasTanah = $data['area_treatment'];
+        $time_estimation = $luasTanah <= 200 ? 4 : ($luasTanah <= 400 ? 7 : ($luasTanah <= 500 ? 10 : 30));
+        $worker_estimation = $luasTanah <= 300 ? 2 : ($luasTanah <= 500 ? 3 : 5);
         $generalData = [
-            'number' => $request->get('number', $this->generateProposalNumber()),
-            'type' => $request->get('type', 'Penawaran Harga Pest Control'),
-            'client_name' => $request->get('client_name', ''),
-            'address' => $request->get('address', ''),
-            'total_technician' => $request->get('total_technician', 2),
-            'estimated_time' => $request->get('estimated_time', '2-3 hari kerja'),
-            'guarantee' => $request->get('guarantee', '1 tahun'),
+            'number' => $data['number'] ?? $this->generateProposalNumber(),
+            'type' => $data['type'] ?? 'Penawaran Harga Pest Control',
+            'client_name' => $data['client_name'] ?? '',
+            'address' => $data['address'] ?? '',
+            'guarantee' => $data['guarantee'] ?? '1 tahun',
+            'estimated_time' => $data['estimated_time'] ?? ($time_estimation . ' hari'),
+            'total_technician' => $data['total_technician'] ?? ($worker_estimation . ' orang'),
+
         ];
 
         foreach ($generalData as $key => $value) {
@@ -62,69 +111,85 @@ class ProposalController extends Controller
         }
     }
 
-    private function fillServiceSpecificAttributes($template, $serviceType, $request)
+    private function fillServiceSpecificAttributes(TemplateProcessor $template, string $serviceType, array $data)
     {
         Log::info("Inside fillServiceSpecificAttributes. The serviceType is: " . $serviceType);
+        $rawPrice = $data['final_price_raw'];
         switch ($serviceType) {
             case 'pipanasi':
-                $this->fillPipanasiAttributes($template, $request);
+                $pipanasiPriceRaw = $rawPrice * 1.3;
+                $data['final_price'] = 'Rp ' . number_format(round($pipanasiPriceRaw), 0, ',', '.');
+                $psychologicalPriceRaw = $pipanasiPriceRaw * 1.2;
+                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
+                $this->fillPipanasiAttributes($template, $data);
                 break;
             case 'spraying':
-                $this->fillSprayingAttributes($template, $request);
+                $psychologicalPriceRaw = $rawPrice * 1.2;
+                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
+                $this->fillSprayingAttributes($template, $data);
                 break;
             case 'inject_spraying':
-                $this->fillInjectSprayingAttributes($template, $request);
+                $psychologicalPriceRaw = $rawPrice * 1.2;
+                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
+                $this->fillInjectSprayingAttributes($template, $data);
                 break;
         }
     }
 
-    private function fillPipanasiAttributes($template, $request)
+    private function fillPipanasiAttributes(TemplateProcessor $template, array $data)
     {
-        $area = $request->get('area_treatment', '100');
-        Log::info($area);
+        $area = $data['area_treatment'] ?? '100';
         $pipanasiData = [
             'area_treatment' => $area,
+            'final_price' => $data['final_price'] ?? 'N/A',
+            'psychological_price' => $data['psychological_price'] ?? 'N/A',
         ];
         foreach ($pipanasiData as $key => $value) {
             $template->setValue($key, $value);
         }
     }
 
-    private function fillSprayingAttributes($template, $request)
+    private function fillSprayingAttributes(TemplateProcessor $template, array $data)
     {
-        // Currently no specific attributes for spraying
-        // Add here when needed
+        $sprayingData = [
+            'area_treatment' => $data['area_treatment'] ?? '100',
+            'final_price' => $data['final_price'] ?? 'N/A',
+            'psychological_price' => $data['psychological_price'] ?? 'N/A',
+        ];
+        foreach ($sprayingData as $key => $value) {
+            $template->setValue($key, $value);
+        }
     }
 
-    private function fillInjectSprayingAttributes($template, $request)
+
+    private function fillInjectSprayingAttributes(TemplateProcessor $template, array $data)
     {
-        // Currently no specific attributes for inject_spraying
-        // Add here when needed
+        $injectSprayingData = [
+            'area_treatment' => $data['area_treatment'] ?? '100',
+            'final_price' => $data['final_price'] ?? 'N/A',
+            'psychological_price' => $data['psychological_price'] ?? 'N/A',
+        ];
+        foreach ($injectSprayingData as $key => $value) {
+            $template->setValue($key, $value);
+        }
     }
 
-    private function processImages(TemplateProcessor $template, Request $request)
+    private function processImages(TemplateProcessor $template, array $imageGroups)
     {
-        $imageGroups = $request->input('images', []);
-
-        if (empty($imageGroups) || !is_array($imageGroups)) {
+        if (empty($imageGroups)) {
             $template->cloneBlock('image_block', 0);
             return;
         }
 
         $template->cloneBlock('image_block', count($imageGroups), true, true);
-
         $targetHeight = 300;
         $spacing = 10;
-
         foreach ($imageGroups as $i => $group) {
             $index = $i + 1;
-
             if (!is_array($group)) {
                 continue;
             }
-
             $template->setValue("image_desc#{$index}", $group['description'] ?? '');
-
             if (!empty($group['paths'])) {
                 $this->processAndSetImage($template, "image_content#{$index}", $group['paths'], $index, $targetHeight, $spacing);
             } else {
@@ -132,6 +197,7 @@ class ProposalController extends Controller
             }
         }
     }
+
 
     private function processAndSetImage(TemplateProcessor $template, string $placeholder, array $imagePaths, int $index, int $targetHeight, int $spacing)
     {

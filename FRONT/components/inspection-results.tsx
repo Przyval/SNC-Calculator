@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2, Mail, MessageCircle, Copy, Check, FileText } from "lucide-react"
@@ -8,9 +8,9 @@ import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 
-interface InspectionImage {
-  url: string
-  description: string
+interface ProposalFile {
+  blob: Blob;
+  filename: string;
 }
 
 interface InspectionResultData {
@@ -43,6 +43,13 @@ interface PerhitunganData {
   biayaPerbaikan: number;
   biayaLayanan: number;
   penghematan: number;
+
+  transport: 'mobil' | 'motor';
+  jarakTempuh: number;
+  jumlahLantai: number;
+  monitoringPerBulan: number;
+  preparationSet: Record<string, number>;
+  additionalSet: Record<string, number>;
 }
 interface KecamatanData { id: string; name: string; riskLevel: "tinggi" | "sedang" | "rendah"; }
 interface FullExportData {
@@ -72,6 +79,11 @@ export default function InspectionResults({ inspectionResults, fullExportData, a
   const [isSharing, setIsSharing] = useState(false);
   const [isDownloadingProposal, setIsDownloadingProposal] = useState(false);
 
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [proposalFile, setProposalFile] = useState<ProposalFile | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+
+  const fetchInitiated = useRef(false);
 
   // Print functionality
   const handlePrint = () => {
@@ -147,7 +159,7 @@ export default function InspectionResults({ inspectionResults, fullExportData, a
           <p>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</p>
         </div>
         
-        <div class="print-info-grid">
+           <div class="print-info-grid">
           <div class="print-section">
             <h3>Informasi Inspeksi</h3>
             <p><strong>Nama Klien:</strong> ${inspectionResults?.clientName || '-'}</p>
@@ -157,15 +169,17 @@ export default function InspectionResults({ inspectionResults, fullExportData, a
           </div>
           
           <div class="print-section">
-            <h3>Ringkasan Temuan</h3>
-            <p><strong>Jumlah Foto:</strong> ${inspectionResults?.images?.length || 0}</p>
-            <p><strong>Status:</strong> ${inspectionResults?.status || '-'}</p>
-            <p><strong>Rekomendasi:</strong> ${getRecommendationSummary(inspectionResults?.status || '')}</p>
+            <h3>Informasi Properti</h3>
+            <p><strong>Alamat:</strong> ${fullExportData.hasilPerhitungan?.lokasiRumah || '-'}</p>
+            <p><strong>Luas Tanah:</strong> ${fullExportData.hasilPerhitungan?.luasTanah || '-'} m²</p>
+            <p><strong>Jumlah Lantai:</strong> ${fullExportData.hasilPerhitungan?.jumlahLantai || '-'} lantai</p>
+            <p><strong>Umur Bangunan:</strong> ${fullExportData.hasilPerhitungan?.umurBangunan || '-'} tahun</p>
           </div>
         </div>
 
         <div class="print-section">
           <h3>Kesimpulan & Rekomendasi</h3>
+          <p><strong>Status:</strong> ${inspectionResults?.status || '-'}</p>
           <p style="white-space: pre-line;">${inspectionResults?.summary || ''}</p>
           <div style="margin-top: 15px; padding: 10px; background-color: #f5f5f5;">
             <h4>Opsi Penanganan Lanjutan:</h4>
@@ -299,8 +313,8 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
   };
 
 
-  const fetchProposalFile = async () => {
-    if (!inspectionResults || !fullExportData.client || !accessToken) {
+  const fetchProposalFile = async (): Promise<ProposalFile> => {
+    if (!inspectionResults || !fullExportData.client || !accessToken || !fullExportData.hasilPerhitungan) {
       throw new Error("Data tidak lengkap atau sesi tidak valid.");
     }
 
@@ -312,7 +326,13 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
       images: inspectionResults.images.map(img => ({
         description: img.description,
         paths: [img.url]
-      }))
+      })),
+      transport: fullExportData.hasilPerhitungan.transport,
+      distance_km: fullExportData.hasilPerhitungan.jarakTempuh,
+      floor_count: fullExportData.hasilPerhitungan.jumlahLantai,
+      monitoring_duration_months: fullExportData.hasilPerhitungan.monitoringPerBulan,
+      preparation_set_items: fullExportData.hasilPerhitungan.preparationSet,
+      additional_set_items: fullExportData.hasilPerhitungan.additionalSet,
     };
 
     const laravelApiUrl = process.env.NEXT_PUBLIC_LARAVEL_API_URL || 'http://localhost:8000';
@@ -351,17 +371,50 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
 
       const filename = `Proposal_${apiPayload.client_name.replace(/ /g, '_')}.docx`;
       return { blob, filename };
+      // return new Promise(resolve => setTimeout(() => resolve({ blob: new Blob(), filename: 'test.docx' }), 2000));
     } catch (error) {
       console.error('Fetch error:', error);
       throw error;
     }
   };
 
+  useEffect(() => {
+    const prepareProposalForSharing = async () => {
+      console.log("Memulai proses pembuatan proposal di latar belakang...");
+      setIsGenerating(true);
+      setGenerationError(null);
+
+      try {
+        const fileData = await fetchProposalFile();
+        setProposalFile(fileData);
+        console.log("File proposal berhasil disiapkan dan disimpan di state.");
+      } catch (error) {
+        console.error("Gagal menyiapkan file proposal:", error);
+        if (error instanceof Error) {
+          setGenerationError(error.message);
+        } else {
+          setGenerationError("Terjadi kesalahan yang tidak diketahui.");
+        }
+      } finally {
+        setIsGenerating(false);
+      }
+    };
+    if (inspectionResults && fullExportData.client && accessToken && !fetchInitiated.current) {
+      fetchInitiated.current = true;
+      prepareProposalForSharing();
+    }
+  }, [inspectionResults, fullExportData, accessToken]);
+
   const handleShareProposal = async () => {
+    if (!proposalFile) {
+      alert("File proposal belum siap atau gagal dibuat. Silakan coba lagi.");
+      return;
+    }
     setIsSharing(true);
     setShowShareMenu(false);
+
     try {
-      const { blob, filename } = await fetchProposalFile();
+      const { blob, filename } = proposalFile;
       const file = new File([blob], filename, { type: blob.type });
 
       if (navigator.share && navigator.canShare({ files: [file] })) {
@@ -373,19 +426,39 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
       } else {
         alert("Browser Anda tidak mendukung fitur berbagi file. Gunakan tombol 'Unduh Proposal' sebagai gantinya.");
       }
-    } catch (error) {
+    } catch (error: unknown) { // Secara eksplisit menandai tipe sebagai 'unknown'
       console.error("Gagal membagikan proposal:", error);
-      alert(`Terjadi kesalahan saat membagikan proposal: ${error instanceof Error ? error.message : String(error)}`);
+
+      // --- PERBAIKAN DI SINI ---
+      // Gunakan type guard untuk memeriksa apakah 'error' adalah objek Error
+      if (error instanceof Error) {
+        // Di dalam blok ini, TypeScript sekarang tahu bahwa 'error' memiliki properti 'name' dan 'message'
+        if (error.name === 'NotAllowedError') {
+          alert("Gagal membagikan: Izin ditolak. Ini biasanya terjadi jika proses berbagi tidak dipicu langsung oleh klik pengguna.");
+        } else if (error.name === 'AbortError') {
+          // Ini bukan error teknis, pengguna hanya membatalkan dialog
+          console.log("Proses berbagi dibatalkan oleh pengguna.");
+        } else {
+          // Untuk error lain yang merupakan instance dari Error
+          alert(`Terjadi kesalahan saat membagikan proposal: ${error.message}`);
+        }
+      } else {
+        // Fallback jika yang di-throw bukan objek Error (misalnya, throw "some string")
+        alert(`Terjadi kesalahan yang tidak diketahui: ${String(error)}`);
+      }
     } finally {
       setIsSharing(false);
     }
   };
 
-  // NEW: Function for the dedicated download button
   const handleDownloadProposal = async () => {
+    if (!proposalFile) {
+      alert("File proposal belum siap atau gagal dibuat. Silakan coba lagi.");
+      return;
+    }
     setIsDownloadingProposal(true);
     try {
-      const { blob, filename } = await fetchProposalFile();
+      const { blob, filename } = proposalFile;
 
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -454,7 +527,7 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
             <Printer className="h-4 w-4 mr-1" />
             Cetak
           </Button>
-          <Button
+          {/* <Button
             variant="outline"
             size="sm"
             className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black"
@@ -467,7 +540,7 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
               <Download className="h-4 w-4 mr-1" />
             )}
             Unduh
-          </Button>
+          </Button> */}
 
           <Button
             variant="outline"
@@ -499,13 +572,29 @@ Terima kasih telah mempercayakan inspeksi rayap kepada kami.`;
             {showShareMenu && (
               <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                 <div className="py-1">
-                  <button
-                    onClick={handleShareProposal}
-                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 font-medium"
-                  >
-                    <FileText className="h-4 w-4 mr-2 text-purple-600" />
-                    Bagikan Proposal (.docx)
-                  </button>
+                  <div className="px-4 py-2 text-sm text-gray-700">
+                    {isGenerating && (
+                      <div className="flex items-center">
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <span>Menyiapkan proposal...</span>
+                      </div>
+                    )}
+                    {generationError && (
+                      <div className="text-red-600">
+                        <p>Gagal: {generationError}</p>
+                      </div>
+                    )}
+                    {!isGenerating && !generationError && (
+                      <button
+                        onClick={handleShareProposal}
+                        className="flex items-center w-full hover:text-black"
+                        disabled={!proposalFile || isSharing}
+                      >
+                        <FileText className="h-4 w-4 mr-2" />
+                        <span>Bagikan Proposal</span>
+                      </button>
+                    )}
+                  </div>
 
                   <div className="border-t my-1"></div>
 
