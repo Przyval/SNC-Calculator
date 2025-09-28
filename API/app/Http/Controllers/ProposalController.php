@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Intervention\Image\Drivers\Gd\Driver;
+use Intervention\Image\ImageManager;
 use Intervention\Image\Laravel\Facades\Image;
 use PhpOffice\PhpWord\TemplateProcessor;
 use App\Services\ExcelCalculationService;
@@ -62,7 +64,7 @@ class ProposalController extends Controller
         $validated['final_price_raw'] = $roundedPrice;
         $validated['final_price'] = 'Rp ' . number_format($roundedPrice, 0, ',', '.');
         $proposalType = $request->get('proposal_type', 'pest_control');
-        $serviceType = in_array($validated['service_type'], ['pipanasi', 'inject_spraying', 'spraying'])
+        $serviceType = in_array($validated['service_type'], ['pipanasi', 'inject_spraying', 'spraying', 'baiting', 'refill_pipanasi'])
             ? $validated['service_type'] : 'spraying';
         $templatePath = storage_path("app/templates/{$serviceType}.docx");
 
@@ -72,7 +74,7 @@ class ProposalController extends Controller
 
         $template = new TemplateProcessor($templatePath);
 
-        $this->fillGeneralAttributes($template, $validated);
+        $this->fillGeneralAttributes($template, $validated, $serviceType);
 
         $this->fillServiceSpecificAttributes($template, $serviceType, $validated);
 
@@ -90,11 +92,27 @@ class ProposalController extends Controller
         return response()->download($outputPath)->deleteFileAfterSend(true);
     }
 
-    private function fillGeneralAttributes(TemplateProcessor $template, array $data)
+    private function fillGeneralAttributes(TemplateProcessor $template, array $data, string $serviceType)
     {
         $luasTanah = $data['area_treatment'];
-        $time_estimation = $luasTanah <= 200 ? 4 : ($luasTanah <= 400 ? 7 : ($luasTanah <= 500 ? 10 : 30));
-        $worker_estimation = $luasTanah <= 300 ? 2 : ($luasTanah <= 500 ? 3 : 5);
+        $time_estimation = '';
+        $worker_estimation = '';
+
+        if ($serviceType === 'baiting') {
+            if ($luasTanah >= 1 && $luasTanah <= 999) {
+                $time_estimation = '1 hari';
+                $worker_estimation = '2 orang';
+            } elseif ($luasTanah >= 1000) {
+                $time_estimation = '2 hari';
+                $worker_estimation = '3 orang';
+            } else {
+                $time_estimation = 'N/A';
+                $worker_estimation = 'N/A';
+            }
+        } else {
+            $time_estimation = $luasTanah <= 200 ? '4 hari' : ($luasTanah <= 400 ? '7 hari' : ($luasTanah <= 500 ? '10 hari' : '30 hari'));
+            $worker_estimation = $luasTanah <= 300 ? '2 orang' : ($luasTanah <= 500 ? '3 orang' : '5 orang');
+        }
         $generalData = [
             'number' => $data['number'] ?? $this->generateProposalNumber(),
             'type' => $data['type'] ?? 'Penawaran Harga Pest Control',
@@ -103,7 +121,6 @@ class ProposalController extends Controller
             'guarantee' => $data['guarantee'] ?? '1 tahun',
             'estimated_time' => $data['estimated_time'] ?? ($time_estimation . ' hari'),
             'total_technician' => $data['total_technician'] ?? ($worker_estimation . ' orang'),
-
         ];
 
         foreach ($generalData as $key => $value) {
@@ -115,6 +132,7 @@ class ProposalController extends Controller
     {
         Log::info("Inside fillServiceSpecificAttributes. The serviceType is: " . $serviceType);
         $rawPrice = $data['final_price_raw'];
+        $area = $data['area_treatment'];
         switch ($serviceType) {
             case 'pipanasi':
                 $pipanasiPriceRaw = $rawPrice * 1.3;
@@ -124,7 +142,9 @@ class ProposalController extends Controller
                 $this->fillPipanasiAttributes($template, $data);
                 break;
             case 'spraying':
-                $psychologicalPriceRaw = $rawPrice * 1.2;
+                $sprayingPriceRaw = $area * 12250;
+                $data['final_price'] = 'Rp ' . number_format(round($sprayingPriceRaw), 0, ',', '.');
+                $psychologicalPriceRaw = $sprayingPriceRaw * 1.2;
                 $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
                 $this->fillSprayingAttributes($template, $data);
                 break;
@@ -132,6 +152,18 @@ class ProposalController extends Controller
                 $psychologicalPriceRaw = $rawPrice * 1.2;
                 $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
                 $this->fillInjectSprayingAttributes($template, $data);
+                break;
+            case 'baiting':
+                $psychologicalPriceRaw = $rawPrice * 1.2;
+                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
+                $this->fillBaitingAttributes($template, $data);
+                break;
+            case 'refill_pipanasi':
+                $refillPipanasiPriceRaw = $area * 33600;
+                $data['final_price'] = 'Rp ' . number_format(round($refillPipanasiPriceRaw), 0, ',', '.');
+                $psychologicalPriceRaw = $refillPipanasiPriceRaw * 1.2;
+                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
+                $this->fillRefillPipanasi($template, $data);
                 break;
         }
     }
@@ -174,12 +206,43 @@ class ProposalController extends Controller
         }
     }
 
+    private function fillBaitingAttributes(TemplateProcessor $template, array $data)
+    {
+        $baitingData = [
+            'area_treatment' => $data['area_treatment'] ?? '100',
+            'final_price' => $data['final_price'] ?? 'N/A',
+            'psychological_price' => $data['psychological_price'] ?? 'N/A',
+        ];
+        foreach ($baitingData as $key => $value) {
+            $template->setValue($key, $value);
+        }
+    }
+
+    private function fillRefillPipanasi(TemplateProcessor $template, array $data)
+    {
+        $baitingData = [
+            'area_treatment' => $data['area_treatment'] ?? '100',
+            'final_price' => $data['final_price'] ?? 'N/A',
+            'psychological_price' => $data['psychological_price'] ?? 'N/A',
+        ];
+        foreach ($baitingData as $key => $value) {
+            $template->setValue($key, $value);
+        }
+    }
+
     private function processImages(TemplateProcessor $template, array $imageGroups)
     {
-        if (empty($imageGroups)) {
+        Log::info('DATA RECEIVED IN processImages:', ['imageGroups' => $imageGroups]);
+        $hasImages = !empty($imageGroups) && isset($imageGroups[0]['paths']) && !empty($imageGroups[0]['paths'][0]);
+
+        Log::info('Image check result:', ['hasImages' => $hasImages]);
+        if (!$hasImages) {
+            $template->setValue('inspection_heading', '');
             $template->cloneBlock('image_block', 0);
             return;
         }
+
+        $template->setValue('inspection_heading', 'HASIL INSPEKSI');
 
         $template->cloneBlock('image_block', count($imageGroups), true, true);
         $targetHeight = 300;
@@ -189,7 +252,8 @@ class ProposalController extends Controller
             if (!is_array($group)) {
                 continue;
             }
-            $template->setValue("image_desc#{$index}", $group['description'] ?? '');
+            $description = !empty($group['description']) ? $group['description'] : 'no detail';
+            $template->setValue("image_desc#{$index}", $description);
             if (!empty($group['paths'])) {
                 $this->processAndSetImage($template, "image_content#{$index}", $group['paths'], $index, $targetHeight, $spacing);
             } else {
@@ -211,10 +275,12 @@ class ProposalController extends Controller
 
             if (file_exists($fullPath)) {
                 try {
+                    // This uses the v3 Facade, which is correct
                     $img = Image::read($fullPath);
                     $img->scaleDown(null, $targetHeight);
                     $resized[] = $img;
                 } catch (\Exception $e) {
+                    Log::error("Could not process image: {$fullPath}. Error: " . $e->getMessage());
                     continue;
                 }
             }
@@ -222,7 +288,10 @@ class ProposalController extends Controller
 
         if ($resized) {
             $totalWidth = array_sum(array_map(fn($img) => $img->width(), $resized)) + ($spacing * (count($resized) - 1));
-            $canvas = Image::canvas($totalWidth, $targetHeight, '#ffffff');
+            $manager = new ImageManager(new Driver());
+
+            $canvas = $manager->create($totalWidth, $targetHeight)->fill('ffffff');
+
             $x = 0;
             foreach ($resized as $ri) {
                 $canvas->place($ri, 'top-left', $x, 0);

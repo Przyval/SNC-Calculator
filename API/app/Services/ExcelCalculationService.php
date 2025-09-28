@@ -67,16 +67,34 @@ class ExcelCalculationService
         $this->fillTransportationAndSdm($sheet, $data);
         $this->fillMaterialQuantities($sheet, $data['preparationSet'], $data['additionalSet']);
         $this->fillTimenWorkerEstimation($sheet, $data);
-        
+
         return $spreadsheet;
     }
 
     private function fillTimenWorkerEstimation(Worksheet $sheet, array $data)
     {
         $luasTanah = $data['luasTanah'];
-        $time_estimation = $luasTanah <= 200 ? 4 : ($luasTanah <= 400 ? 7 : ($luasTanah <= 500 ? 10 : 30));
-        $worker_estimation = $luasTanah <= 300 ? 2 : ($luasTanah <= 500 ? 3 : 5);
         $transportType = $data['transport'];
+        $serviceType = $data['service_type'] ?? 'spraying';
+        $time_estimation = 0;
+        $worker_estimation = 0;
+
+        if ($serviceType === 'baiting') {
+            if ($luasTanah >= 1 && $luasTanah <= 999) {
+                $time_estimation = 1;
+                $worker_estimation = 2;
+            } elseif ($luasTanah >= 1000) {
+                $time_estimation = 2;
+                $worker_estimation = 3;
+            } else {
+                $time_estimation = 0;
+                $worker_estimation = 0;
+                Log::warning("Baiting service type has area_treatment outside defined ranges: {$luasTanah}");
+            }
+        } else {
+            $time_estimation = $luasTanah <= 200 ? 4 : ($luasTanah <= 400 ? 7 : ($luasTanah <= 500 ? 10 : 30));
+            $worker_estimation = $luasTanah <= 300 ? 2 : ($luasTanah <= 500 ? 3 : 5);
+        }
         if ($transportType === 'mobil') {
             $sheet->setCellValue('C29', $time_estimation);
             $sheet->setCellValue('C41', $time_estimation);

@@ -731,11 +731,12 @@ export default function KalkulatorRisiko({ onHasilPerhitungan, accessToken }: Ka
                 <Select value={treatment} onValueChange={setTreatment}>
                   <SelectTrigger id="inspection-treatment" className="mt-2 bg-black/50 border-amber-600"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-black text-white border-amber-600">
-                    <SelectItem value="Smart System">Smart System</SelectItem>
+                    <SelectItem value="Smart_System">Smart System</SelectItem>
                     <SelectItem value="Inject_Spraying">Inject Spraying</SelectItem>
                     <SelectItem value="Baiting">Baiting</SelectItem>
                     <SelectItem value="Spraying">Spraying</SelectItem>
                     <SelectItem value="Pipanasi">Pipanasi</SelectItem>
+                    <SelectItem value="Refill_Pipanasi">Refill Pipanasi</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
