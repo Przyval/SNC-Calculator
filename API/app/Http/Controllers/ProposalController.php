@@ -16,9 +16,11 @@ class ProposalController extends Controller
     public function __construct(private ExcelCalculationService $calculationService)
     {
     }
+
     public function generate(Request $request)
     {
-        Log::info($request->all());
+        Log::info('Proposal generation request received:', $request->all());
+
         $rules = [
             'client_name' => 'required|string',
             'address' => 'required|string',
@@ -32,15 +34,26 @@ class ProposalController extends Controller
             'additional_set_items' => 'present|array',
             'images' => 'nullable|array',
         ];
+
         $validator = Validator::make($request->all(), $rules);
         if ($validator->fails()) {
-            Log::error('Proposal generation validation failed.', $validator->errors()->toArray());
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
+
         $validated = $validator->validated();
+        $serviceType = $validated['service_type'];
+        $proposalType = $request->get('proposal_type', 'pest_control');
+
+        $templatePath = storage_path("app/templates/{$serviceType}.docx");
+        if (!file_exists($templatePath)) {
+            Log::error("Template not found for service type: {$serviceType}");
+            return response()->json(['error' => 'Template not found'], 404);
+        }
+        $template = new TemplateProcessor($templatePath);
+
+        $this->fillGeneralAttributes($template, $validated, $serviceType);
+        $this->processImages($template, $validated['images'] ?? []);
+
         $serviceDataForCalculation = [
             'luasTanah' => $validated['area_treatment'],
             'jarakTempuh' => $validated['distance_km'],
@@ -51,191 +64,160 @@ class ProposalController extends Controller
             'client_name' => $validated['client_name'],
             'address' => $validated['address'],
             'transport' => $validated['transport'],
+            'service_type' => $serviceType,
         ];
-        $finalPrice = 0;
+
         try {
-            $finalPrice = $this->calculationService->getCalculatedPrice($serviceDataForCalculation);
-            Log::info('Successfully calculated final price from Excel service: ' . $finalPrice);
+            $comparisonResults = $this->calculationService->getComparativePrices($serviceDataForCalculation);
+
+            if (!empty($comparisonResults)) {
+                Log::info('Filling template with comparative prices.', $comparisonResults);
+                $this->fillComparativeAttributes($template, $comparisonResults, $serviceType, $validated['area_treatment']);
+            } else {
+                Log::info('No comparison needed. Calculating single price.');
+                $basePrice = $this->calculationService->getCalculatedPrice($serviceDataForCalculation);
+                $this->fillSinglePriceAttributes($template, $basePrice, $validated);
+            }
         } catch (\Exception $e) {
-            Log::error('Could not calculate price from Excel Service: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to calculate the price from the backend engine.'], 500);
+            Log::error('Proposal generation failed during price calculation: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to calculate price and generate proposal.'], 500);
         }
-        $roundedPrice = round($finalPrice);
-        $validated['final_price_raw'] = $roundedPrice;
-        $validated['final_price'] = 'Rp ' . number_format($roundedPrice, 0, ',', '.');
-        $proposalType = $request->get('proposal_type', 'pest_control');
-        $serviceType = in_array($validated['service_type'], ['pipanasi', 'inject_spraying', 'spraying', 'baiting', 'refill_pipanasi'])
-            ? $validated['service_type'] : 'spraying';
-        $templatePath = storage_path("app/templates/{$serviceType}.docx");
-
-        if (!file_exists($templatePath)) {
-            return response()->json(['error' => 'Template not found'], 404);
-        }
-
-        $template = new TemplateProcessor($templatePath);
-
-        $this->fillGeneralAttributes($template, $validated, $serviceType);
-
-        $this->fillServiceSpecificAttributes($template, $serviceType, $validated);
-
-        $this->processImages($template, $validated['images'] ?? []);
 
         $outputFilename = $this->generateOutputFilename($proposalType, $serviceType, $validated['client_name']);
         $outputPath = storage_path("app/generated/{$outputFilename}");
-
         if (!file_exists(dirname($outputPath))) {
             mkdir(dirname($outputPath), 0755, true);
         }
-
+        $this->clearUnusedPlaceholders($template);
         $template->saveAs($outputPath);
 
         return response()->download($outputPath)->deleteFileAfterSend(true);
     }
 
+    private function fillComparativeAttributes(TemplateProcessor $template, array $comparisonResults, string $serviceType, float $area)
+    {
+        $chemicalDetails = [
+            'Expose Soil Treatent per Liter Larutan' => [
+                'name' => 'Expose 55 SC',
+                'desc_1' => 'Bahan aktif Fipronil...',
+                'desc_2' => 'Dosis 5-10 ml/L',
+                'desc_3' => 'Konsentrasi 5,5 %',
+                'image' => storage_path('app/templates/images/expose.png'),
+                'treatment_name' => 'Pipanisasi & Spraying Chemical Expose by KRISTAL',
+            ],
+            'Agenda Soil Treatent per Liter Larutan' => [
+                'name' => 'Agenda 25 EC',
+                'desc_1' => 'Bahan aktif Fipronil',
+                'desc_2' => 'Efektif membasmi rayap...',
+                'desc_3' => 'Dosis 10 ml/L',
+                'image' => storage_path('app/templates/images/agenda.png'),
+                'treatment_name' => 'Pipanisasi & Spraying Chemical Agenda by Envu Indonesia',
+            ],
+            'Premise Soil Treatent per Liter Larutan' => [
+                'name' => 'Premise 200 SL',
+                'desc_1' => 'Bahan aktif Imidakloprid',
+                'desc_2' => 'Non-repellent...',
+                'desc_3' => 'Dosis 2.5 ml/L',
+                'image' => storage_path('app/templates/images/premise.png'),
+                'treatment_name' => 'Pipanisasi & Spraying Chemical Premise by Envu Indonesia',
+            ],
+        ];
+
+        $template->cloneBlock('chemical_block', count($comparisonResults), true, true);
+        $template->cloneBlock('price_block', count($comparisonResults), true, true);
+
+        $i = 1;
+        foreach ($comparisonResults as $chemicalKey => $priceData) {
+            if (isset($chemicalDetails[$chemicalKey])) {
+                $details = $chemicalDetails[$chemicalKey];
+                $template->setValue("chem_name#{$i}", $details['name']);
+                $template->setValue("chem_desc_1#{$i}", $details['desc_1']);
+                $template->setValue("chem_desc_2#{$i}", $details['desc_2']);
+                $template->setValue("chem_desc_3#{$i}", $details['desc_3']);
+                if (file_exists($details['image'])) {
+                    $template->setImageValue("chem_image#{$i}", ['path' => $details['image'], 'width' => 150]);
+                }
+
+                $basePriceForChemical = $priceData['price'];
+                $adjustedPrices = $this->applyServicePriceAdjustments($serviceType, $basePriceForChemical, $area);
+                Log::info("Setting price values for #{$i}", [
+                    'counter' => $i,
+                    'treatment_name' => $details['treatment_name'],
+                    'final_price' => $adjustedPrices['final_price'],
+                    'psychological_price' => $adjustedPrices['psychological_price']
+                ]);
+                try {
+                    $template->setValue("price_block_counter#{$i}", $i);
+                    $template->setValue("price_treatment_name#{$i}", $details['treatment_name']);
+                    $template->setValue("price_final#{$i}", 'Rp ' . number_format($adjustedPrices['final_price'], 0, ',', '.'));
+                    $template->setValue("price_psychological#{$i}", 'Rp ' . number_format($adjustedPrices['psychological_price'], 0, ',', '.'));
+                    $template->setValue("price_guarantee#{$i}", '3 Tahun Garansi');
+
+                    Log::info("Successfully set all price_block values for #{$i}");
+                } catch (\Exception $e) {
+                    Log::error("Failed to set price_block values for #{$i}: " . $e->getMessage());
+                }
+
+                $i++;
+            }
+        }
+    }
+
+    private function fillSinglePriceAttributes(TemplateProcessor $template, float $basePrice, array $data)
+    {
+        $adjustedPrices = $this->applyServicePriceAdjustments($data['service_type'], $basePrice, $data['area_treatment']);
+
+        $template->setValue('final_price', 'Rp ' . number_format($adjustedPrices['final_price'], 0, ',', '.'));
+        $template->setValue('psychological_price', 'Rp ' . number_format($adjustedPrices['psychological_price'], 0, ',', '.'));
+        $template->setValue('area_treatment', $data['area_treatment'] ?? 'N/A');
+        $template->cloneBlock('chemical_block', 0);
+        $template->cloneBlock('price_block', 0);
+    }
+
+    private function applyServicePriceAdjustments(string $serviceType, float $rawPrice, float $area): array
+    {
+        $finalPrice = $rawPrice;
+
+        switch ($serviceType) {
+            case 'pipanasi':
+                $finalPrice = $rawPrice * 1.3;
+                break;
+            case 'spraying':
+                $finalPrice = $area * 12250;
+                break;
+            case 'refill_pipanasi':
+                $finalPrice = $area * 33600;
+                break;
+        }
+
+        $psychologicalPrice = $finalPrice * 1.2;
+
+        return [
+            'final_price' => round($finalPrice),
+            'psychological_price' => round($psychologicalPrice),
+        ];
+    }
+
     private function fillGeneralAttributes(TemplateProcessor $template, array $data, string $serviceType)
     {
         $luasTanah = $data['area_treatment'];
-        $time_estimation = '';
-        $worker_estimation = '';
+        $time_estimation = $serviceType === 'baiting' ? ($luasTanah <= 999 ? '1 hari' : '2 hari') : ($luasTanah <= 200 ? '4 hari' : ($luasTanah <= 400 ? '7 hari' : ($luasTanah <= 500 ? '10 hari' : '30 hari')));
+        $worker_estimation = $serviceType === 'baiting' ? ($luasTanah <= 999 ? '2 orang' : '3 orang') : ($luasTanah <= 300 ? '2 orang' : ($luasTanah <= 500 ? '3 orang' : '5 orang'));
 
-        if ($serviceType === 'baiting') {
-            if ($luasTanah >= 1 && $luasTanah <= 999) {
-                $time_estimation = '1 hari';
-                $worker_estimation = '2 orang';
-            } elseif ($luasTanah >= 1000) {
-                $time_estimation = '2 hari';
-                $worker_estimation = '3 orang';
-            } else {
-                $time_estimation = 'N/A';
-                $worker_estimation = 'N/A';
-            }
-        } else {
-            $time_estimation = $luasTanah <= 200 ? '4 hari' : ($luasTanah <= 400 ? '7 hari' : ($luasTanah <= 500 ? '10 hari' : '30 hari'));
-            $worker_estimation = $luasTanah <= 300 ? '2 orang' : ($luasTanah <= 500 ? '3 orang' : '5 orang');
-        }
-        $generalData = [
-            'number' => $data['number'] ?? $this->generateProposalNumber(),
-            'type' => $data['type'] ?? 'Penawaran Harga Pest Control',
-            'client_name' => $data['client_name'] ?? '',
-            'address' => $data['address'] ?? '',
-            'guarantee' => $data['guarantee'] ?? '1 tahun',
-            'estimated_time' => $data['estimated_time'] ?? ($time_estimation . ' hari'),
-            'total_technician' => $data['total_technician'] ?? ($worker_estimation . ' orang'),
-        ];
-
-        foreach ($generalData as $key => $value) {
-            $template->setValue($key, $value);
-        }
-    }
-
-    private function fillServiceSpecificAttributes(TemplateProcessor $template, string $serviceType, array $data)
-    {
-        Log::info("Inside fillServiceSpecificAttributes. The serviceType is: " . $serviceType);
-        $rawPrice = $data['final_price_raw'];
-        $area = $data['area_treatment'];
-        switch ($serviceType) {
-            case 'pipanasi':
-                $pipanasiPriceRaw = $rawPrice * 1.3;
-                $data['final_price'] = 'Rp ' . number_format(round($pipanasiPriceRaw), 0, ',', '.');
-                $psychologicalPriceRaw = $pipanasiPriceRaw * 1.2;
-                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
-                $this->fillPipanasiAttributes($template, $data);
-                break;
-            case 'spraying':
-                $sprayingPriceRaw = $area * 12250;
-                $data['final_price'] = 'Rp ' . number_format(round($sprayingPriceRaw), 0, ',', '.');
-                $psychologicalPriceRaw = $sprayingPriceRaw * 1.2;
-                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
-                $this->fillSprayingAttributes($template, $data);
-                break;
-            case 'inject_spraying':
-                $psychologicalPriceRaw = $rawPrice * 1.2;
-                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
-                $this->fillInjectSprayingAttributes($template, $data);
-                break;
-            case 'baiting':
-                $psychologicalPriceRaw = $rawPrice * 1.2;
-                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
-                $this->fillBaitingAttributes($template, $data);
-                break;
-            case 'refill_pipanasi':
-                $refillPipanasiPriceRaw = $area * 33600;
-                $data['final_price'] = 'Rp ' . number_format(round($refillPipanasiPriceRaw), 0, ',', '.');
-                $psychologicalPriceRaw = $refillPipanasiPriceRaw * 1.2;
-                $data['psychological_price'] = 'Rp ' . number_format(round($psychologicalPriceRaw), 0, ',', '.');
-                $this->fillRefillPipanasi($template, $data);
-                break;
-        }
-    }
-
-    private function fillPipanasiAttributes(TemplateProcessor $template, array $data)
-    {
-        $area = $data['area_treatment'] ?? '100';
-        $pipanasiData = [
-            'area_treatment' => $area,
-            'final_price' => $data['final_price'] ?? 'N/A',
-            'psychological_price' => $data['psychological_price'] ?? 'N/A',
-        ];
-        foreach ($pipanasiData as $key => $value) {
-            $template->setValue($key, $value);
-        }
-    }
-
-    private function fillSprayingAttributes(TemplateProcessor $template, array $data)
-    {
-        $sprayingData = [
-            'area_treatment' => $data['area_treatment'] ?? '100',
-            'final_price' => $data['final_price'] ?? 'N/A',
-            'psychological_price' => $data['psychological_price'] ?? 'N/A',
-        ];
-        foreach ($sprayingData as $key => $value) {
-            $template->setValue($key, $value);
-        }
-    }
-
-
-    private function fillInjectSprayingAttributes(TemplateProcessor $template, array $data)
-    {
-        $injectSprayingData = [
-            'area_treatment' => $data['area_treatment'] ?? '100',
-            'final_price' => $data['final_price'] ?? 'N/A',
-            'psychological_price' => $data['psychological_price'] ?? 'N/A',
-        ];
-        foreach ($injectSprayingData as $key => $value) {
-            $template->setValue($key, $value);
-        }
-    }
-
-    private function fillBaitingAttributes(TemplateProcessor $template, array $data)
-    {
-        $baitingData = [
-            'area_treatment' => $data['area_treatment'] ?? '100',
-            'final_price' => $data['final_price'] ?? 'N/A',
-            'psychological_price' => $data['psychological_price'] ?? 'N/A',
-        ];
-        foreach ($baitingData as $key => $value) {
-            $template->setValue($key, $value);
-        }
-    }
-
-    private function fillRefillPipanasi(TemplateProcessor $template, array $data)
-    {
-        $baitingData = [
-            'area_treatment' => $data['area_treatment'] ?? '100',
-            'final_price' => $data['final_price'] ?? 'N/A',
-            'psychological_price' => $data['psychological_price'] ?? 'N/A',
-        ];
-        foreach ($baitingData as $key => $value) {
-            $template->setValue($key, $value);
-        }
+        $template->setValue('number', $this->generateProposalNumber());
+        $template->setValue('type', 'Penawaran Harga Pest Control');
+        $template->setValue('client_name', $data['client_name'] ?? '');
+        $template->setValue('address', $data['address'] ?? '');
+        $template->setValue('guarantee', '1 tahun');
+        $template->setValue('estimated_time', $time_estimation);
+        $template->setValue('total_technician', $worker_estimation);
     }
 
     private function processImages(TemplateProcessor $template, array $imageGroups)
     {
-        Log::info('DATA RECEIVED IN processImages:', ['imageGroups' => $imageGroups]);
+        Log::info('Processing inspection images:', ['imageGroups' => $imageGroups]);
         $hasImages = !empty($imageGroups) && isset($imageGroups[0]['paths']) && !empty($imageGroups[0]['paths'][0]);
 
-        Log::info('Image check result:', ['hasImages' => $hasImages]);
         if (!$hasImages) {
             $template->setValue('inspection_heading', '');
             $template->cloneBlock('image_block', 0);
@@ -243,15 +225,11 @@ class ProposalController extends Controller
         }
 
         $template->setValue('inspection_heading', 'HASIL INSPEKSI');
-
         $template->cloneBlock('image_block', count($imageGroups), true, true);
         $targetHeight = 300;
         $spacing = 10;
         foreach ($imageGroups as $i => $group) {
             $index = $i + 1;
-            if (!is_array($group)) {
-                continue;
-            }
             $description = !empty($group['description']) ? $group['description'] : 'no detail';
             $template->setValue("image_desc#{$index}", $description);
             if (!empty($group['paths'])) {
@@ -262,65 +240,61 @@ class ProposalController extends Controller
         }
     }
 
-
     private function processAndSetImage(TemplateProcessor $template, string $placeholder, array $imagePaths, int $index, int $targetHeight, int $spacing)
     {
         $resized = [];
         foreach ($imagePaths as $imgPath) {
-            if (!is_string($imgPath) || empty($imgPath)) {
+            if (!is_string($imgPath) || empty($imgPath))
                 continue;
-            }
-
             $fullPath = public_path($imgPath);
-
             if (file_exists($fullPath)) {
                 try {
-                    // This uses the v3 Facade, which is correct
-                    $img = Image::read($fullPath);
-                    $img->scaleDown(null, $targetHeight);
-                    $resized[] = $img;
+                    $img = Image::read($fullPath)->scaleDown(null, $targetHeight);
+                    if ($img->width() > 0 && $img->height() > 0) {
+                        $resized[] = $img;
+                    }
                 } catch (\Exception $e) {
                     Log::error("Could not process image: {$fullPath}. Error: " . $e->getMessage());
-                    continue;
                 }
             }
         }
 
-        if ($resized) {
-            $totalWidth = array_sum(array_map(fn($img) => $img->width(), $resized)) + ($spacing * (count($resized) - 1));
-            $manager = new ImageManager(new Driver());
-
-            $canvas = $manager->create($totalWidth, $targetHeight)->fill('ffffff');
-
-            $x = 0;
-            foreach ($resized as $ri) {
-                $canvas->place($ri, 'top-left', $x, 0);
-                $x += $ri->width() + $spacing;
-            }
-
-            $outPath = storage_path("app/public/generated/image_group_{$index}_" . time() . ".png");
-
-            if (!file_exists(dirname($outPath))) {
-                mkdir(dirname($outPath), 0755, true);
-            }
-
-            $canvas->save($outPath);
-
-            $template->setImageValue($placeholder, [
-                'path' => $outPath,
-                'width' => $totalWidth,
-                'height' => $targetHeight,
-            ]);
-        } else {
+        if (empty($resized)) {
             $template->setValue($placeholder, '');
+            return;
         }
+
+        $totalWidth = array_sum(array_map(fn($img) => $img->width(), $resized)) + ($spacing * (count($resized) - 1));
+        if ($totalWidth <= 0 || $targetHeight <= 0) {
+            $template->setValue($placeholder, '');
+            return;
+        }
+
+        $canvas = (new ImageManager(new Driver()))->create($totalWidth, $targetHeight)->fill('ffffff');
+
+        $x = 0;
+        foreach ($resized as $ri) {
+            $canvas->place($ri, 'top-left', $x, 0);
+            $x += $ri->width() + $spacing;
+        }
+
+        $outPath = storage_path("app/public/generated/image_group_{$index}_" . time() . ".png");
+        if (!file_exists(dirname($outPath))) {
+            mkdir(dirname($outPath), 0755, true);
+        }
+        $canvas->save($outPath);
+        $maxWidth = min($totalWidth, 600);
+        $template->setImageValue($placeholder, [
+            'path' => $outPath,
+            'width' => $maxWidth,
+            'height' => $targetHeight,
+            'ratio' => false
+        ]);
     }
 
     private function generateProposalNumber()
     {
-        $prefix = date('Y-m');
-        $random = str_pad(rand(1, 999), 3, '0', STR_PAD_LEFT);
-        return "{$random}-SPH-PC-{$prefix}";
+        return str_pad(rand(1, 999), 3, '0', STR_PAD_LEFT) . "-SPH-PC-" . date('Y-m');
     }
 
     private function generateOutputFilename($proposalType, $serviceType, $clientName)
@@ -333,7 +307,7 @@ class ProposalController extends Controller
     public function getAvailableServiceTypes($proposalType = 'pest_control')
     {
         $serviceTypes = [
-            'pest_control' => ['pipanasi', 'spraying', 'inject_spraying'],
+            'pest_control' => ['pipanasi', 'spraying', 'inject_spraying', 'refill_pipanasi'],
             'rat_control' => ['baiting', 'trapping', 'exclusion'],
         ];
 
@@ -349,5 +323,28 @@ class ProposalController extends Controller
             'proposal_type' => $proposalType,
             'available_service_types' => $serviceTypes
         ]);
+    }
+
+    private function clearUnusedPlaceholders(TemplateProcessor $template)
+    {
+        $placeholders = [
+            'inspection_heading',
+            'image_desc',
+            'image_content',
+            'chem_name',
+            'chem_desc_1',
+            'chem_desc_2',
+            'chem_desc_3',
+            'price_treatment_name',
+            'price_final',
+            'price_psychological'
+        ];
+
+        foreach ($placeholders as $placeholder) {
+            try {
+                $template->setValue($placeholder, '');
+            } catch (\Exception $e) {
+            }
+        }
     }
 }

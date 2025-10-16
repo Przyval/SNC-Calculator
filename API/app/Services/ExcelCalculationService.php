@@ -15,26 +15,33 @@ class ExcelCalculationService
      * @var array<string, string>
      */
     private array $materialCellMap = [
-        'Agadi Treatent per Liter Larutan' => 'C65',
-        'Expose Soil Treatent per Liter Larutan' => 'C66',
-        'Xterm AG Station' => 'C67',
-        'Xterm IG Station' => 'C68',
-        'Expose Wood Treatent per Liter Larutan' => 'C69',
-        'Queen Killer' => 'C70',
-        'Mata Bor kayu 2mm' => 'C73',
-        'Mata Bor kayu 3mm' => 'C74',
-        'Mata bor Hilti 6mm' => 'C77',
-        'Mata Bor Hilti 8mm' => 'C78',
-        'Mata Bor Hilti 10mm' => 'C79',
-        'Semen Warna' => 'C80',
-        'Premium' => 'C81',
-        'Oli Fastron 10W-40SL' => 'C82',
-        'Jarum B&G' => 'C76',
-        'Masker untuk Klien' => 'C95',
-        'Company Profile' => 'C96',
-        'Laporan/SPK/Surat/Kontrak' => 'C97',
-        'BAP' => 'C98',
-        'LOG BOOK' => 'C99',
+        'Expose Soil Treatent per Liter Larutan' => 'C65',
+        'Premise Soil Treatent per Liter Larutan' => 'C66',
+        'Agenda Soil Treatent per Liter Larutan' => 'C67',
+        'Xterm AG Station' => 'C68',
+        'Xterm IG Station' => 'C69',
+        'Expose Wood Treatent per Liter Larutan' => 'C70',
+        'Queen Killer' => 'C71',
+        'Mata Bor kayu 2mm' => 'C74',
+        'Mata Bor kayu 3mm' => 'C75',
+        'Mata bor Hilti 6mm' => 'C78',
+        'Mata Bor Hilti 8mm' => 'C79',
+        'Mata Bor Hilti 10mm' => 'C80',
+        'Semen Warna' => 'C81',
+        'Premium' => 'C82',
+        'Oli Fastron 10W-40SL' => 'C83',
+        'Jarum B&G' => 'C84',
+        'Masker untuk Klien' => 'C96',
+        'Company Profile' => 'C97',
+        'Laporan/SPK/Surat/Kontrak' => 'C98',
+        'BAP' => 'C99',
+        'LOG BOOK' => 'C100',
+    ];
+
+    private array $comparativeChemicals = [
+        'Expose Soil Treatent per Liter Larutan',
+        'Premise Soil Treatent per Liter Larutan',
+        'Agenda Soil Treatent per Liter Larutan',
     ];
 
     public function __construct()
@@ -42,18 +49,61 @@ class ExcelCalculationService
         $this->templatePath = storage_path("app/templates/calculation_template.xlsx");
     }
 
-    /**
-     * Main method for the API: calculates the price and returns just the final value.
-     */
     public function getCalculatedPrice(array $data): float
     {
         $spreadsheet = $this->getFilledSpreadsheet($data);
         return $spreadsheet->getActiveSheet()->getCell('O17')->getCalculatedValue();
     }
 
-    /**
-     * Main method for the Proposal Generator: returns the entire filled spreadsheet object.
-     */
+    public function getComparativePrices(array $data): array
+    {
+        $originalPrepSet = $data['preparationSet'] ?? [];
+        $selectedChemicals = array_intersect(
+            array_keys($originalPrepSet),
+            $this->comparativeChemicals
+        );
+
+        if (empty($selectedChemicals)) {
+            return [];
+        }
+        $otherPrepItems = array_diff_key($originalPrepSet, array_flip($this->comparativeChemicals));
+
+        $comparisonResults = [];
+
+        foreach ($selectedChemicals as $chemicalToCalculate) {
+            $tempData = $data;
+            $currentPrepSet = $otherPrepItems;
+
+            foreach ($this->comparativeChemicals as $chem) {
+                if (array_key_exists($chem, $originalPrepSet)) {
+                    $currentPrepSet[$chem] = ($chem === $chemicalToCalculate) ? 1 : 0;
+                }
+            }
+
+            $tempData['preparationSet'] = $currentPrepSet;
+
+            Log::info("Calculating comparative price for '{$chemicalToCalculate}' with final prep set:", $currentPrepSet);
+
+            $spreadsheet = $this->getFilledSpreadsheet($tempData);
+            $sheet = $spreadsheet->getActiveSheet();
+
+            $price = $sheet->getCell('O17')->getCalculatedValue();
+            $quantity = 0;
+            if ($chemicalToCalculate === 'Expose Soil Treatent per Liter Larutan') {
+                $quantity = $sheet->getCell('M66')->getCalculatedValue();
+            } else {
+                $quantity = $sheet->getCell('M67')->getCalculatedValue();
+            }
+            $comparisonResults[$chemicalToCalculate] = [
+                'price' => round($price),
+                'formatted_price' => 'Rp ' . number_format(round($price), 0, ',', '.'),
+                'auto_quantity_liter' => round($quantity, 2),
+            ];
+        }
+
+        return $comparisonResults;
+    }
+
     public function getFilledSpreadsheet(array $data): Spreadsheet
     {
         if (!file_exists($this->templatePath)) {
@@ -65,7 +115,7 @@ class ExcelCalculationService
 
         $this->fillGeneralInfo($sheet, $data);
         $this->fillTransportationAndSdm($sheet, $data);
-        $this->fillMaterialQuantities($sheet, $data['preparationSet'], $data['additionalSet']);
+        $this->fillMaterialQuantities($sheet, $data['preparationSet'] ?? [], $data['additionalSet'] ?? []);
         $this->fillTimenWorkerEstimation($sheet, $data);
 
         return $spreadsheet;
@@ -134,9 +184,25 @@ class ExcelCalculationService
         }
     }
 
-    private function fillMaterialQuantities(Worksheet $sheet, array $prepItems, array $addItems): void
+    private function fillMaterialQuantities(Worksheet $sheet, array $data): void
     {
+        $prepItems = $data['preparationSet'] ?? [];
+        $addItems = $data['additionalSet'] ?? [];
+        $serviceType = $data['service_type'] ?? null;
+
+        foreach ($this->materialCellMap as $cellAddress) {
+            $sheet->setCellValue($cellAddress, 0);
+        }
+
         $allItems = array_merge($prepItems, $addItems);
+
+        if ($serviceType === 'baiting') {
+            Log::info("Baiting service detected. Forcing soil treatment chemical quantities to 0.");
+            unset($allItems['Expose Soil Treatent per Liter Larutan']);
+            unset($allItems['Premise Soil Treatent per Liter Larutan']);
+            unset($allItems['Agenda Soil Treatent per Liter Larutan']);
+        }
+
         foreach ($allItems as $name => $quantity) {
             if (isset($this->materialCellMap[$name])) {
                 $sheet->setCellValue($this->materialCellMap[$name], $quantity);
