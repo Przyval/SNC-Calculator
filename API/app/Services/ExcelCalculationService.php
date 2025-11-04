@@ -15,6 +15,7 @@ class ExcelCalculationService
      * @var array<string, string>
      */
     private array $materialCellMap = [
+        //termite
         'Expose Soil Treatent per Liter Larutan' => 'C65',
         'Premise Soil Treatent per Liter Larutan' => 'C66',
         'Agenda Soil Treatent per Liter Larutan' => 'C67',
@@ -31,11 +32,48 @@ class ExcelCalculationService
         'Premium' => 'C82',
         'Oli Fastron 10W-40SL' => 'C83',
         'Jarum B&G' => 'C84',
-        'Masker untuk Klien' => 'C96',
-        'Company Profile' => 'C97',
-        'Laporan/SPK/Surat/Kontrak' => 'C98',
-        'BAP' => 'C99',
-        'LOG BOOK' => 'C100',
+
+        //rodent
+        'Unit PP Tray' => 'C133',
+        'Racumin Unit PP Tray' => 'C134',
+        'Unit Black Box' => 'C136',
+        'Racumin Block Black Box' => 'C137',
+        'Unit Block Perangkap Masal' => 'C139',
+        'Racumin Block Perangkap Masal' => 'C140',
+        'Unit Glue Box Segitiga' => 'C142',
+        'Racumin Glue Box Segitiga' => 'C143',
+
+        //gpc
+        'SMASH 100 EC Fogging per Liter Larutan' => 'C94',
+        'Clearmos Fogging per Liter Larutan' => 'C95',
+        'Storin Fogging per Liter Larutan (White Oil)' => 'C96',
+        'K Othrine Fogging per Liter Larutan' => 'C97',
+        'CLEARMOS ULV PER LITER LARUTAN' => 'C98',
+        'K OTHRINE ULV PER LITER LARUTAN' => 'C99',
+        'Lavender per Liter Larutan' => 'C101',
+        'Agenda RSD Semut/Rayap per Liter Larutan' => 'C102',
+        'Storin per Liter Larutan' => 'C103',
+        'TENOPA RSD Kecoa Jerman' => 'C104',
+        'K OTHRINE per Liter Larutan' => 'C105',
+        'Flygard Bait Lalat' => 'C106',
+        'Agita WG Bait Lalat' => 'C107',
+        'Blattanex Gel Bait trap' => 'C110',
+        'Max Force Quantum Gel Semut' => 'C111',
+        'Pohon Lalat' => 'C112',
+        'Hoy Hoy (Kecoa)' => 'C116',
+        'Vectobac Larvasida' => 'C120',
+        'Abate Larvasida' => 'C121',
+        'Fly Catcher' => 'C125',
+        'Blackhole' => 'C126',
+        'Cat Trap' => 'C129',
+        'Conant' => 'C130',
+
+        //additional
+        'Masker untuk Klien' => 'C147',
+        'Company Profile' => 'C148',
+        'Laporan/SPK/Surat/Kontrak' => 'C149',
+        'BAP' => 'C150',
+        'LOG BOOK' => 'C151',
     ];
 
     private array $comparativeChemicals = [

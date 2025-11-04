@@ -1,12 +1,14 @@
 "use client"
 
-import { Card } from "@/components/ui/card"
-import { Bug, Rat, SprayCan, ArrowRight } from "lucide-react"
+import { useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Bug, Rat, SprayCan, ArrowRight, CheckCircle2 } from "lucide-react";
 
-export type ServiceType = 'TC' | 'RC' | 'GPC' | 'GPRC';
+import { type ServiceType } from "./types";
 
 interface ServiceSelectionProps {
-  onServiceSelected: (service: ServiceType) => void;
+  onServiceSelected: (services: ServiceType[]) => void;
 }
 
 const serviceOptions = [
@@ -15,49 +17,95 @@ const serviceOptions = [
     title: "Termite Control (TC)",
     description: "Kalkulasi risiko dan inspeksi untuk pengendalian rayap.",
     icon: <Bug className="h-12 w-12 text-amber-500" />,
+    color: "amber"
   },
   {
     type: 'RC' as ServiceType,
     title: "Rat Control (RC)",
     description: "Formulir inspeksi dan penanganan untuk pengendalian tikus.",
     icon: <Rat className="h-12 w-12 text-blue-500" />,
+    color: "blue"
   },
   {
     type: 'GPC' as ServiceType,
     title: "General Pest Control (GPC)",
     description: "Formulir untuk penanganan hama umum seperti semut, kecoa, dll.",
     icon: <SprayCan className="h-12 w-12 text-green-500" />,
+    color: "green"
   },
   {
     type: 'GPRC' as ServiceType,
     title: "General Pest and Rodent Control (GPRC)",
     description: "Formulir untuk penanganan hama umum dan tikus.",
     icon: <SprayCan className="h-12 w-12 text-purple-500" />,
+    color: "purple"
   },
 ];
 
 export default function ServiceSelection({ onServiceSelected }: ServiceSelectionProps) {
+  const [selectedServices, setSelectedServices] = useState<ServiceType[]>([]);
+
+  const handleToggleService = (serviceType: ServiceType) => {
+    setSelectedServices((prevSelected) => {
+      if (prevSelected.includes(serviceType)) {
+        return prevSelected.filter((s) => s !== serviceType);
+      }
+      else {
+        return [...prevSelected, serviceType];
+      }
+    });
+  };
+
+  const handleContinue = () => {
+    if (selectedServices.length > 0) {
+      onServiceSelected(selectedServices);
+    }
+  };
+
   return (
     <Card className="p-6 bg-black/90 border-l-4 border-yellow-500 text-white shadow-lg space-y-8">
       <div className="text-center">
         <h2 className="text-2xl font-bold headline">Pilih Jenis Layanan</h2>
-        <p className="text-white/70 mt-2">Pilih jenis pengendalian hama yang akan dilakukan.</p>
+        <p className="text-white/70 mt-2">Anda dapat memilih satu atau lebih layanan untuk dibandingkan.</p>
       </div>
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {serviceOptions.map((service) => (
-          <div
-            key={service.type}
-            onClick={() => onServiceSelected(service.type)}
-            className="group relative p-6 bg-gray-900/50 rounded-lg border-2 border-gray-700 hover:border-amber-500 hover:bg-gray-900 transition-all duration-300 cursor-pointer transform hover:-translate-y-2"
-          >
-            <div className="flex flex-col items-center text-center">
-              <div className="mb-4">{service.icon}</div>
-              <h3 className="text-lg font-bold text-white mb-2">{service.title}</h3>
-              <p className="text-sm text-white/60">{service.description}</p>
+        {serviceOptions.map((service) => {
+          const isSelected = selectedServices.includes(service.type);
+          return (
+            <div
+              key={service.type}
+              onClick={() => handleToggleService(service.type)}
+              className={`
+                group relative p-6 bg-gray-900/50 rounded-lg border-2 
+                transition-all duration-300 cursor-pointer transform hover:-translate-y-2
+                ${isSelected 
+                  ? 'border-amber-500 bg-amber-900/30'
+                  : 'border-gray-700 hover:border-amber-500 hover:bg-gray-900'
+                }
+              `}
+            >
+              {isSelected && (
+                <CheckCircle2 className="absolute top-4 right-4 h-6 w-6 text-amber-500 transition-all" />
+              )}
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-4">{service.icon}</div>
+                <h3 className="text-lg font-bold text-white mb-2">{service.title}</h3>
+                <p className="text-sm text-white/60">{service.description}</p>
+              </div>
             </div>
-            <ArrowRight className="absolute bottom-4 right-4 h-6 w-6 text-gray-600 group-hover:text-amber-500 transition-colors" />
-          </div>
-        ))}
+          );
+        })}
+      </div>
+      <div className="pt-4 text-center">
+        <Button
+          onClick={handleContinue}
+          disabled={selectedServices.length === 0}
+          className="bg-amber-500 hover:bg-amber-600 text-black font-bold py-3 px-8 text-lg rounded-lg transition-all
+                     disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-500"
+        >
+          Lanjutkan
+          <ArrowRight className="ml-2 h-5 w-5" />
+        </Button>
       </div>
     </Card>
   )

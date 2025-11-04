@@ -11,27 +11,19 @@ class Inspection extends Model
     use HasFactory;
 
     protected $fillable = [
-        'risk_calculation_id',
-        'date_time',
-        'summary',
-        'recommendation',
-        'treatment',
-        'status',
+        'proposal_number',
+        'client_id',
+        'agent_name',
+        'service_type',
+        'inspection_data',
+        'details_data',
     ];
-
-    /**
-     * An inspection belongs to a single risk calculation record.
-     */
-    public function riskCalculation(): BelongsTo
+    protected $casts = [
+        'inspection_data' => 'array',
+        'details_data' => 'array',
+    ];
+    public function client()
     {
-        return $this->belongsTo(RiskCalculation::class);
-    }
-
-    /**
-     * An inspection can have many images.
-     */
-    public function images(): HasMany
-    {
-        return $this->hasMany(InspectionImage::class);
+        return $this->belongsTo(Client::class);
     }
 }

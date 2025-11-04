@@ -5,74 +5,20 @@ import { useSession } from "next-auth/react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Variants, TargetAndTransition } from "framer-motion"
-import { ArrowRight, ArrowLeft, Home, User, Check, ShieldCheck, FileText } from "lucide-react"
+import { ArrowRight, ArrowLeft, Home, User, Check, ShieldCheck, FileText, AlertTriangle } from "lucide-react"
 import ClientSelection from "@/components/client-selection"
-import ServiceSelection, { ServiceType } from "@/components/service-selection"
-import TermiteControlForm from "@/components/termite-control-form"
-import RatControlForm from "@/components/rat-control-form"
-import GeneralPestControlForm from "@/components/general-pest-control-form"
-import GeneralPestAndRodentControlForm from "@/components/general-pest-and-rodent-control-form"
+import ServiceSelection from "@/components/service-selection"
+import DynamicControlForm from "@/components/dynamic-control-form"
 import InspectionResults from "@/components/inspection-results"
 import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
 
-export interface UnifiedResultData {
-  serviceType: ServiceType;
-  client: ClientData | null;
-  agentName: string;
-  inspection: {
-    dateTime: string;
-    images: { url: string; description: string }[];
-    summary: string;
-    recommendation: string;
-    treatment: string;
-    status: string;
-  };
-  details: {
-    lokasiRumah?: string;
-    luasTanah?: number;
-    umurBangunan?: number;
-    materialBangunan?: string;
-    riwayatRayap?: string;
-    tingkatKelembaban?: number;
-    jumlahPerabotKayu?: number;
-    adaLahanKosongDisekitar?: string;
-    jenisLantai?: string;
-    transport?: 'mobil' | 'motor';
-    jarakTempuh?: number;
-    jumlahLantai?: number;
-    monitoringPerBulan?: number;
-    preparationSet?: Record<string, number>;
-    additionalSet?: Record<string, number>;
-    
-    // Hasil kalkulasi
-    skorRisiko?: number;
-    kategoriRisiko?: string;
-    estimasiKerugian?: number;
-    rekomendasiLayanan?: string;
-    biayaPerbaikan?: number;
-    biayaLayanan?: number;
-    penghematan?: number;
+import { 
+  type ServiceType, 
+  type UnifiedResultData,
+  type ClientData
+} from "./types";
 
-    // Detail spesifik untuk Rat Control (RC)
-    tingkatInfestasi?: 'Rendah' | 'Sedang' | 'Tinggi';
-    jumlahBaitStation?: number;
-    jumlahPerangkap?: number;
-    rekomendasiSanitasi?: string;
-
-    // Detail spesifik untuk General Pest Control (GPC)
-    targetHama?: string[];
-    areaAplikasi?: string;
-    bahanAktifKimia?: string;
-
-    // GPRC will likely use a combination of RC and GPC fields
-  };
-}
-
-export interface ClientData {
-  id: number | null;
-  name: string;
-}
 
 export default function FlowController() {
   const { data: session, status } = useSession();
@@ -80,15 +26,18 @@ export default function FlowController() {
 
   const [currentStep, setCurrentStep] = useState(1);
   const [client, setClient] = useState<ClientData | null>(null);
-  const [serviceType, setServiceType] = useState<ServiceType | null>(null);
+
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [finalResults, setFinalResults] = useState<UnifiedResultData | null>(null);
+
+  const [isSaving, setIsSaving] = useState(false);
 
   const [showPopup, setShowPopup] = useState(false);
   const [popupMessage, setPopupMessage] = useState("");
   const [popupIcon, setPopupIcon] = useState<React.ReactNode | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [direction, setDirection] = useState(1);
-  
+
   const TOTAL_STEPS = 4;
 
   if (status === "loading") {
@@ -105,9 +54,9 @@ export default function FlowController() {
     setTimeout(goToNextStep, 1500);
   };
 
-  const handleServiceSelected = (selectedService: ServiceType) => {
-    setServiceType(selectedService);
-    showPopupMessage(`Layanan "${selectedService}" dipilih.`, <ShieldCheck className="h-8 w-8 text-amber-500" />);
+  const handleServiceSelected = (selectedServices: ServiceType[]) => {
+    setServiceTypes(selectedServices);
+    showPopupMessage(`Layanan "${selectedServices.join(', ')}" dipilih.`, <ShieldCheck className="h-8 w-8 text-amber-500" />);
     setTimeout(goToNextStep, 1500);
   }
 
@@ -116,15 +65,42 @@ export default function FlowController() {
     goToNextStep();
   }
 
-  const saveDataToDatabase = async () => {
-    if (!finalResults) {
-      showPopupMessage("Tidak ada data untuk disimpan.", null);
-      return;
+  const saveDataToDatabase = async (): Promise<boolean> => {
+    if (!finalResults || !session?.accessToken) {
+      showPopupMessage("Error: Data tidak lengkap atau sesi tidak valid.", <AlertTriangle className="h-8 w-8 text-red-500" />);
+      return false;
     }
-    // TODO: Implementasikan logika penyimpanan yang fleksibel ke backend Anda
-    // Anda bisa mengirim 'finalResults' langsung ke sebuah endpoint
-    console.log("Menyimpan data ke database:", finalResults);
-    showPopupMessage("Data berhasil disimpan!", <Check className="h-8 w-8 text-green-500" />);
+
+    setIsSaving(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${apiUrl}/inspections`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(finalResults),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.error || `Gagal menyimpan data. Status: ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      showPopupMessage(`Data berhasil disimpan! No: ${result.proposal_number}`, <Check className="h-8 w-8 text-green-500" />);
+      return true;
+
+    } catch (error: any) {
+      console.error("Gagal menyimpan data ke database:", error);
+      showPopupMessage(error.message || "Terjadi kesalahan saat menyimpan.", <AlertTriangle className="h-8 w-8 text-red-500" />);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const showPopupMessage = (message: string, icon: React.ReactNode) => {
@@ -157,19 +133,21 @@ export default function FlowController() {
   }
 
   const restartProcess = async () => {
-    await saveDataToDatabase();
-    setTimeout(() => {
-      setIsAnimating(true);
-      setDirection(-1);
+    const success = await saveDataToDatabase();
+    if (success) {
       setTimeout(() => {
-        setCurrentStep(1);
-        setClient(null);
-        setServiceType(null);
-        setFinalResults(null);
-        setIsAnimating(false);
-        showPopupMessage("Memulai proses baru", <Home className="h-8 w-8 text-amber-500" />);
-      }, 700);
-    }, 2000);
+        setIsAnimating(true);
+        setDirection(-1);
+        setTimeout(() => {
+          setCurrentStep(1);
+          setClient(null);
+          setServiceTypes([]);
+          setFinalResults(null);
+          setIsAnimating(false);
+          showPopupMessage("Memulai proses baru", <Home className="h-8 w-8 text-amber-500" />);
+        }, 700);
+      }, 2000);
+    }
   }
 
   const renderStep = () => {
@@ -198,18 +176,18 @@ export default function FlowController() {
               case 2:
                 return <ServiceSelection onServiceSelected={handleServiceSelected} />;
               case 3:
-                switch (serviceType) {
-                  case 'TC':
-                    return <TermiteControlForm client={client} session={session} onFormSubmit={handleFormSubmit} />;
-                  case 'RC':
-                    return <RatControlForm client={client} session={session} onFormSubmit={handleFormSubmit} />;
-                  case 'GPC':
-                    return <GeneralPestControlForm client={client} session={session} onFormSubmit={handleFormSubmit} />;
-                  case 'GPRC':
-                    return <GeneralPestAndRodentControlForm client={client} session={session} onFormSubmit={handleFormSubmit} />;
-                  default:
-                    return <div className="text-center text-red-500 p-8">Error: Jenis layanan tidak valid. Silakan kembali ke langkah sebelumnya.</div>;
-                }
+                return serviceTypes.length > 0 ? (
+                  <DynamicControlForm
+                    client={client}
+                    session={session}
+                    onFormSubmit={handleFormSubmit}
+                    serviceTypes={serviceTypes}
+                  />
+                ) : (
+                  <div className="text-center text-red-500 p-8">
+                    Error: Jenis layanan tidak valid. Silakan kembali ke langkah sebelumnya.
+                  </div>
+                );
               case 4:
                 return finalResults ? <InspectionResults results={finalResults} accessToken={session?.accessToken} /> : <div className="text-center text-white p-8">Memuat hasil...</div>;
               default:
@@ -225,7 +203,7 @@ export default function FlowController() {
     switch (currentStep) {
       case 1: return "Pilih Klien";
       case 2: return "Pilih Jenis Layanan";
-      case 3: return `Input Data (${serviceType || '...'})`;
+      case 3: return `Input Data (${serviceTypes.join(' & ') || '...'})`;
       case 4: return "Hasil & Laporan";
       default: return "";
     }
@@ -278,10 +256,10 @@ export default function FlowController() {
             <motion.div
               key={step}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${step === currentStep
-                  ? "bg-amber-500 text-black font-bold"
-                  : step < currentStep
-                    ? "bg-green-600 text-white"
-                    : "bg-gray-700 text-gray-400"
+                ? "bg-amber-500 text-black font-bold"
+                : step < currentStep
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-700 text-gray-400"
                 }`}
               whileHover={{ scale: 1.15, boxShadow: "0px 5px 10px rgba(0, 0, 0, 0.2)" }}
             >
@@ -292,7 +270,7 @@ export default function FlowController() {
       </div>
 
       <div className="transition-all duration-500 ease-in-out">{renderStep()}</div>
-      
+
       <div className="flex justify-between">
         <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
           <Button
@@ -311,7 +289,7 @@ export default function FlowController() {
             onClick={currentStep < TOTAL_STEPS ? goToNextStep : restartProcess}
             disabled={
               (currentStep === 1 && !client) ||
-              (currentStep === 2 && !serviceType) ||
+              (currentStep === 2 && serviceTypes.length === 0) ||
               (currentStep === 3 && !finalResults) ||
               isAnimating
             }

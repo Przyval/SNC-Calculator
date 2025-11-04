@@ -1,421 +1,345 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { Card } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Camera, ChevronLeft, ChevronRight, ZoomIn, Download, Share2, Printer, Loader2, Mail, MessageCircle, Copy, Check, FileText } from "lucide-react"
-import Image from "next/image"
-import { motion, AnimatePresence } from "framer-motion"
-import { cn } from "@/lib/utils"
-import { UnifiedResultData } from "./flow-controller";
+import { useEffect, useRef, useState, FC } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Camera, ChevronLeft, ChevronRight, Download, Share2, Printer,
+  Loader2, Mail, MessageCircle, Copy, Check, FileText
+} from "lucide-react";
+import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
+import { cn } from "@/lib/utils";
+import { UnifiedResultData, ServiceType, InspectionImage } from "./types";
+
 
 interface ProposalFile {
   blob: Blob;
   filename: string;
 }
 
-interface InspectionResultsProps {
-  results: UnifiedResultData;
-  accessToken?: string;
-}
+const useProposalGenerator = (results: UnifiedResultData, accessToken?: string) => {
+  const [proposalFile, setProposalFile] = useState<ProposalFile | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const fetchInitiated = useRef(false);
+
+  useEffect(() => {
+    const generateInitialProposal = async () => {
+      if (!results?.client || !accessToken || fetchInitiated.current) return;
+      fetchInitiated.current = true;
+      setIsGenerating(true);
+      setGenerationError(null);
+      try {
+        const file = await fetchProposalFile();
+        setProposalFile(file);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Terjadi kesalahan tidak diketahui.";
+        setGenerationError(errorMessage);
+        console.error("Gagal menyiapkan file proposal:", error);
+      } finally {
+        setIsGenerating(false);
+      }
+    };
+    generateInitialProposal();
+  }, [results, accessToken]);
+
+  const fetchProposalFile = async (): Promise<ProposalFile> => {
+    const { serviceTypes, client, inspection, details } = results;
+
+    // Preparation items come from common.preparationSet (already merged from all services)
+    const allPrepItems = details.common?.preparationSet || {};
+    
+    // Additional items are in common.additionalSet (shared across all services)
+    const additionalItems = details.common?.additionalSet || {};
+
+    // Build service details object
+    const serviceDetails: Record<string, any> = {};
+    
+    if (serviceTypes.includes('TC') && details.TC) {
+      serviceDetails.TC = {
+        treatment: details.TC.treatment,
+        status: details.TC.status,
+      };
+    }
+    
+    if (serviceTypes.includes('GPC') && details.GPC) {
+      serviceDetails.GPC = {
+        targetHama: details.GPC.targetHama || [],
+        areaAplikasi: details.GPC.areaAplikasi,
+        bahanAktifKimia: details.GPC.bahanAktifKimia,
+        treatment: details.GPC.treatment || [],
+        status: details.GPC.status,
+      };
+    }
+    
+    if (serviceTypes.includes('RC') && details.RC) {
+      serviceDetails.RC = {
+        tingkatInfestasi: details.RC.tingkatInfestasi,
+        treatment: details.RC.treatment || [],
+        rekomendasiSanitasi: details.RC.rekomendasiSanitasi,
+      };
+    }
+    
+    if (serviceTypes.includes('GPRC') && details.GPRC) {
+      serviceDetails.GPRC = {
+        // Combine GPC and RC details
+        targetHama: details.GPRC.targetHama || details.GPC?.targetHama || [],
+        tingkatInfestasi: details.GPRC.tingkatInfestasi || details.RC?.tingkatInfestasi,
+        treatment: details.GPRC.treatment || [],
+      };
+    }
+
+    const apiPayload = {
+      service_types: serviceTypes,
+      service_details: serviceDetails,
+      client_name: client!.name,
+      client_type: client!.client_type?.name || null,
+      client_email: client!.email || null,
+      client_phone: client!.phone_number || null,
+      address: details.common.lokasiRumah || "N/A",
+      area_treatment: details.common.luasTanah || 100,
+      images: inspection.images.map(img => ({ 
+        description: img.description, 
+        paths: [img.url] 
+      })),
+      transport: details.common.transport || 'mobil',
+      distance_km: details.common.jarakTempuh || 0,
+      floor_count: details.common.jumlahLantai || 1,
+      monitoring_duration_months: details.common.monitoringPerBulan || 1,
+      preparation_set_items: allPrepItems,
+      additional_set_items: additionalItems,
+    };
+
+    console.log('Sending proposal request:', apiPayload);
+
+    const laravelApiUrl = process.env.NEXT_PUBLIC_LARAVEL_API_URL || 'http://localhost:8000';
+    const response = await fetch(`${laravelApiUrl}/api/generate-propose`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/zip',
+      },
+      body: JSON.stringify(apiPayload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server error: ${response.status} - ${errorText}`);
+    }
+
+    const blob = await response.blob();
+    const contentDisposition = response.headers.get('content-disposition');
+    let filename = `Proposal_${apiPayload.client_name.replace(/ /g, '_')}.zip`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch?.[1]) filename = filenameMatch[1];
+    }
+    return { blob, filename };
+  };
+
+  return { proposalFile, isGenerating, generationError };
+};
 
 const laravelLoader = ({ src }: { src: string }) => {
   const laravelUrl = process.env.NEXT_PUBLIC_LARAVEL_API_URL || 'http://localhost:8000';
   return `${laravelUrl}${src}`;
 };
 
-export default function InspectionResults({ results, accessToken }: InspectionResultsProps) {
-  const [activeIndex, setActiveIndex] = useState(0)
-  const [isZoomed, setIsZoomed] = useState(false)
-  const [isDownloading, setIsDownloading] = useState(false);
+const ResultImageGallery: FC<{ images: InspectionImage[] }> = ({ images }) => {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isZoomed, setIsZoomed] = useState(false);
+
+  if (images.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-amber-800/50 rounded-lg">
+        <Camera className="h-16 w-16 text-amber-500/50 mb-4" />
+        <h3 className="text-xl font-bold text-amber-400 mb-2">Tidak Ada Foto Inspeksi</h3>
+        <p className="text-white/70">Data inspeksi tidak menyertakan foto apa pun.</p>
+      </div>
+    );
+  }
+
+  const nextSlide = () => setActiveIndex((current) => (current === images.length - 1 ? 0 : current + 1));
+  const prevSlide = () => setActiveIndex((current) => (current === 0 ? images.length - 1 : current - 1));
+
+  return (
+    <div className="relative">
+      <div className={cn("relative overflow-hidden rounded-md transition-all duration-300 bg-black", isZoomed ? "h-[500px]" : "h-[300px]")}>
+        <AnimatePresence mode="wait">
+          <motion.div key={activeIndex} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="absolute inset-0">
+            <Image loader={laravelLoader} src={images[activeIndex].url} alt={`Inspeksi ${activeIndex + 1}`} fill sizes="(max-width: 768px) 100vw, 50vw" className={cn("object-contain", isZoomed ? "cursor-zoom-out" : "cursor-zoom-in")} onClick={() => setIsZoomed(!isZoomed)} />
+          </motion.div>
+        </AnimatePresence>
+        <Button variant="outline" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500" onClick={prevSlide}><ChevronLeft /></Button>
+        <Button variant="outline" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500" onClick={nextSlide}><ChevronRight /></Button>
+      </div>
+      <div className="mt-4 bg-black/50 p-4 rounded-md border border-amber-800/30">
+        <h3 className="font-bold text-amber-400">Deskripsi Gambar {activeIndex + 1}</h3>
+        <p className="text-white/90 whitespace-pre-line min-h-[40px]">{images[activeIndex]?.description || 'Tidak ada deskripsi.'}</p>
+      </div>
+      <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2">
+        {images.map((image, index) => (
+          <div key={image.url + index} className={cn("relative h-16 rounded-md overflow-hidden cursor-pointer border-2", activeIndex === index ? "border-amber-500" : "border-transparent hover:border-amber-500/50")} onClick={() => setActiveIndex(index)}>
+            <Image loader={laravelLoader} src={image.url} alt={`Thumbnail ${index + 1}`} fill sizes="10vw" className="object-cover" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ResultActions: FC<{ results: UnifiedResultData, proposalFile: ProposalFile | null, isGenerating: boolean, generationError: string | null }> = ({ results, proposalFile, isGenerating, generationError }) => {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isSharing, setIsSharing] = useState(false);
-  const [isDownloadingProposal, setIsDownloadingProposal] = useState(false);
 
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [proposalFile, setProposalFile] = useState<ProposalFile | null>(null);
-  const [generationError, setGenerationError] = useState<string | null>(null);
+  const generateShareText = () => `📋 HASIL LAYANAN (${results.serviceTypes.join(', ')})\n\n👤 Klien: ${results.client?.name || '-'}\n📅 Tanggal: ${results.inspection.dateTime || '-'}\n\n📝 Kesimpulan:\n${results.inspection.summary || ''}\n\n💡 Rekomendasi:\n${results.inspection.recommendation || ''}`;
 
-  const fetchInitiated = useRef(false);
-
-  const { serviceType, client, agentName, inspection, details } = results;
-
-  const handlePrint = () => {
-    alert("Fungsi print belum di-update sepenuhnya untuk semua jenis layanan.");
-  };
-
-  const generateShareText = () => {
-    let detailsText = '';
-    if (serviceType === 'TC' && details.kategoriRisiko) {
-      detailsText = `📊 *Kategori Risiko:* ${details.kategoriRisiko}`;
-    } else if (serviceType === 'RC' && details.tingkatInfestasi) {
-      detailsText = `📊 *Tingkat Infestasi:* ${details.tingkatInfestasi}`;
-    }
-
-    return `🔍 *HASIL LAYANAN ${serviceType}*
-
-👤 *Klien:* ${client?.name || '-'}
-📅 *Tanggal:* ${inspection.dateTime || '-'}
-${detailsText}
-🔧 *Metode:* ${inspection.treatment || '-'}
-👨‍💼 *Agent:* ${agentName || '-'}
-
-📝 *Kesimpulan:*
-${inspection.summary || ''}
-
-💡 *Rekomendasi:*
-${inspection.recommendation || ''}
-
-📸 Dokumentasi: ${inspection.images?.length || 0} foto terlampir
-
----
-Terima kasih telah mempercayakan layanan pengendalian hama kepada kami.`;
-  };
-
-  const shareToWhatsApp = () => {
-    const text = encodeURIComponent(generateShareText());
-    window.open(`https://wa.me/?text=${text}`, '_blank');
-  };
-
-  const shareToEmail = () => {
-    const subject = encodeURIComponent(`Hasil Layanan ${serviceType} - ${client?.name}`);
-    const body = encodeURIComponent(generateShareText());
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-  };
-
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(generateShareText());
+  const handleShare = async (type: 'whatsapp' | 'email' | 'copy') => {
+    const text = generateShareText();
+    if (type === 'whatsapp') window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    if (type === 'email') window.open(`mailto:?subject=${encodeURIComponent(`Hasil Layanan - ${results.client?.name}`)}&body=${encodeURIComponent(text)}`, '_blank');
+    if (type === 'copy') {
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy text: ', err);
     }
   };
 
-  const fetchProposalFile = async (): Promise<ProposalFile> => {
-    if (!results || !client || !accessToken) {
-      throw new Error("Data tidak lengkap atau sesi tidak valid.");
-    }
-
-    const specificTreatmentForTemplate = inspection.treatment.toLowerCase().replace(/ /g, '_');
-
-    const apiPayload = {
-      service_type: specificTreatmentForTemplate,
-      general_service_type: serviceType,
-
-      client_name: client.name,
-      address: details.lokasiRumah || "N/A",
-      area_treatment: details.luasTanah || 100,
-      images: inspection.images.map(img => ({ description: img.description, paths: [img.url] })),
-      transport: details.transport || 'mobil',
-      distance_km: details.jarakTempuh || 0,
-      floor_count: details.jumlahLantai || 1,
-      monitoring_duration_months: details.monitoringPerBulan || 1,
-      preparation_set_items: details.preparationSet || {},
-      additional_set_items: details.additionalSet || {},
-    };
-
-    const laravelApiUrl = process.env.NEXT_PUBLIC_LARAVEL_API_URL || 'http://localhost:8000';
-    const fullUrl = `${laravelApiUrl}/api/generate-propose`;
-
-    try {
-      const response = await fetch(fullUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          // 'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'Accept': 'application/zip',
-        },
-        body: JSON.stringify(apiPayload),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gagal membuat proposal: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-
-      const blob = await response.blob();
-      // const filename = `Proposal_${apiPayload.client_name.replace(/ /g, '_')}_${serviceType}.docx`;
-      // return { blob, filename };
-
-      const contentDisposition = response.headers.get('content-disposition');
-      let filename = `Dokumen_${apiPayload.client_name.replace(/ /g, '_')}.zip`;
-
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-        if (filenameMatch && filenameMatch.length === 2) {
-          filename = filenameMatch[1];
-        }
-      }
-
-      return { blob, filename };
-    } catch (error) {
-      console.error('Fetch error:', error);
-      throw error;
-    }
+  const handleDownload = () => {
+    if (!proposalFile) return;
+    const url = window.URL.createObjectURL(proposalFile.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = proposalFile.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
-  useEffect(() => {
-    const prepareProposalForSharing = async () => {
-      setIsGenerating(true);
-      setGenerationError(null);
-      try {
-        const fileData = await fetchProposalFile();
-        setProposalFile(fileData);
-      } catch (error) {
-        console.error("Gagal menyiapkan file proposal:", error);
-        setGenerationError(error instanceof Error ? error.message : "Terjadi kesalahan.");
-      } finally {
-        setIsGenerating(false);
-      }
-    };
-    if (results && client && accessToken && !fetchInitiated.current) {
-      fetchInitiated.current = true;
-      prepareProposalForSharing();
-    }
-  }, [results, accessToken]);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="outline" size="sm" className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black" onClick={() => window.print()}>
+        <Printer className="h-4 w-4 mr-1" /> Cetak
+      </Button>
+      <Button 
+        variant="outline" 
+        size="sm" 
+        className="border-purple-600 text-purple-500 hover:bg-purple-500 hover:text-black disabled:opacity-50" 
+        onClick={handleDownload} 
+        disabled={isGenerating || !proposalFile}
+      >
+        {isGenerating ? (
+          <>
+            <Loader2 className="h-4 w-4 mr-1 animate-spin" /> Generating...
+          </>
+        ) : (
+          <>
+            <Download className="h-4 w-4 mr-1" /> Unduh Proposal
+          </>
+        )}
+      </Button>
+      {generationError && (
+        <span className="text-red-500 text-xs">{generationError}</span>
+      )}
+      <div className="relative">
+        <Button variant="outline" size="sm" className="border-green-600 text-green-500 hover:bg-green-500 hover:text-black" onClick={() => setShowShareMenu(p => !p)}>
+          <Share2 className="h-4 w-4 mr-1" /> Bagikan
+        </Button>
+        <AnimatePresence>
+          {showShareMenu && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="absolute right-0 top-full mt-2 w-56 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50">
+              <div className="p-2 space-y-1">
+                <button onClick={() => handleShare('whatsapp')} className="flex items-center w-full px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 rounded-md"><MessageCircle className="h-4 w-4 mr-2 text-green-500" /> WhatsApp</button>
+                <button onClick={() => handleShare('email')} className="flex items-center w-full px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 rounded-md"><Mail className="h-4 w-4 mr-2 text-blue-500" /> Email</button>
+                <button onClick={() => handleShare('copy')} className="flex items-center w-full px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 rounded-md">
+                  {copied ? <Check className="h-4 w-4 mr-2 text-green-500" /> : <Copy className="h-4 w-4 mr-2" />}
+                  {copied ? 'Tersalin!' : 'Salin Teks'}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      {showShareMenu && (<div className="fixed inset-0 z-40" onClick={() => setShowShareMenu(false)} />)}
+    </div>
+  );
+};
 
-  const handleShareProposal = async () => {
-    if (!proposalFile) {
-      alert("File proposal belum siap atau gagal dibuat. Silakan coba lagi.");
-      return;
-    }
-    setIsSharing(true);
-    setShowShareMenu(false);
+interface InspectionResultsProps {
+  results: UnifiedResultData;
+  accessToken?: string;
+}
 
-    try {
-      const { blob, filename } = proposalFile;
-      const file = new File([blob], filename, { type: blob.type });
-
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `Proposal Penawaran - ${client?.name}`,
-          text: `Berikut adalah proposal penawaran untuk ${client?.name}.`,
-        });
-      } else {
-        alert("Browser Anda tidak mendukung fitur berbagi file. Gunakan tombol 'Unduh Proposal' sebagai gantinya.");
-      }
-    } catch (error: unknown) {
-      if (error instanceof Error && error.name !== 'AbortError') {
-        alert(`Terjadi kesalahan saat membagikan proposal: ${error.message}`);
-      }
-    } finally {
-      setIsSharing(false);
-    }
-  };
-
-  const handleDownloadProposal = async () => {
-    if (!proposalFile) {
-      alert("File proposal belum siap atau gagal dibuat. Silakan coba lagi.");
-      return;
-    }
-    setIsDownloadingProposal(true);
-    try {
-      const { blob, filename } = proposalFile;
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      alert(`Terjadi kesalahan saat mengunduh: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setIsDownloadingProposal(false);
-    }
-  };
-
-  const nextSlide = () => {
-    if (inspection.images.length === 0) return;
-    setActiveIndex((current) => (current === inspection.images.length - 1 ? 0 : current + 1))
-  }
-
-  const prevSlide = () => {
-    if (inspection.images.length === 0) return;
-    setActiveIndex((current) => (current === 0 ? inspection.images.length - 1 : current - 1))
-  }
-
-  const toggleZoom = () => setIsZoomed(!isZoomed)
+export default function InspectionResults({ results, accessToken }: InspectionResultsProps) {
+  const { proposalFile, isGenerating, generationError } = useProposalGenerator(results, accessToken);
 
   if (!results) {
-    return <Card className="p-6 bg-black/90 text-white"><p>Memuat data hasil...</p></Card>
+    return <Card className="p-6 bg-black/90 text-white"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Memuat data hasil...</Card>;
   }
+
+  const { serviceTypes, client, agentName, inspection, details } = results;
+
+  const getPrimaryStatus = () => {
+    if (details.TC?.status) return { status: details.TC.status, type: 'TC' };
+    if (details.GPC?.status) return { status: details.GPC.status, type: 'GPC' };
+    if (details.RC?.tingkatInfestasi) {
+      return { status: `Infestasi ${details.RC.tingkatInfestasi}`, type: 'RC' };
+    }
+    return { status: "Aman", type: 'common' };
+  };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Terdeteksi Rayap":
-      case "Terdeteksi Hama":
-        return "bg-red-500/80";
-      case "Butuh Pencegahan": return "bg-yellow-500/80";
-      case "Aman": return "bg-green-500/80";
-      default: return "bg-gray-500/80";
-    }
-  }
+    if (status.includes("Terdeteksi") || status.includes("Tinggi") || status.includes("Sedang")) return "bg-red-500";
+    if (status.includes("Pencegahan") || status.includes("Rendah")) return "bg-yellow-500 text-black";
+    if (status.includes("Aman")) return "bg-green-500";
+    return "bg-gray-500";
+  };
 
-  const renderSpecificDetails = () => {
-    switch (serviceType) {
-      case 'TC':
-        return (
-          <div className="space-y-2">
-            <h4 className="font-bold text-amber-400 mb-1">Detail Risiko Rayap</h4>
-            <div className="flex"><span className="text-white/70 w-40">Skor Risiko:</span><span className="font-bold">{details.skorRisiko}</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Kategori Risiko:</span><span className="font-bold text-red-400">{details.kategoriRisiko}</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Estimasi Kerugian:</span><span>{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(details.estimasiKerugian || 0)}</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Biaya Layanan:</span><span>{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(details.biayaLayanan || 0)}</span></div>
-          </div>
-        );
-      case 'RC':
-        return (
-          <div className="space-y-2">
-            <h4 className="font-bold text-blue-400 mb-1">Detail Pengendalian Tikus</h4>
-            <div className="flex"><span className="text-white/70 w-40">Tingkat Infestasi:</span><span className="font-bold">{details.tingkatInfestasi}</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Jml. Bait Station:</span><span>{details.jumlahBaitStation} unit</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Jml. Perangkap:</span><span>{details.jumlahPerangkap} unit</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Rekom. Sanitasi:</span><p className="flex-1">{details.rekomendasiSanitasi}</p></div>
-          </div>
-        );
-      case 'GPC':
-        return (
-          <div className="space-y-2">
-            <h4 className="font-bold text-green-400 mb-1">Detail Hama Umum</h4>
-            <div className="flex"><span className="text-white/70 w-40">Target Hama:</span><span className="font-bold">{details.targetHama?.join(', ')}</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Area Aplikasi:</span><span>{details.areaAplikasi}</span></div>
-            <div className="flex"><span className="text-white/70 w-40">Bahan Aktif:</span><span>{details.bahanAktifKimia}</span></div>
-          </div>
-        );
-      default:
-        return <p>Tidak ada detail spesifik untuk layanan ini.</p>;
-    }
-  }
-
+  const primaryStatus = getPrimaryStatus();
 
   return (
     <Card className="p-6 bg-black/90 border-l-4 border-yellow-500 text-white shadow-lg">
-      <div className="flex items-center justify-between gap-2 mb-6">
-        <div className="flex items-center gap-2">
-          <Camera className="h-6 w-6 text-amber-500" />
-          <h2 className="text-xl md:text-2xl font-bold headline">HASIL LAYANAN {serviceType}</h2>
+      <header className="flex items-center justify-between gap-2 mb-6 flex-wrap">
+        <div className="flex items-center gap-3">
+          <FileText className="h-7 w-7 text-amber-500" />
+          <h2 className="text-xl md:text-2xl font-bold headline">HASIL LAYANAN ({serviceTypes.join(' & ')})</h2>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black" onClick={handlePrint}>
-            <Printer className="h-4 w-4 mr-1" /> Cetak
-          </Button>
-          <Button variant="outline" size="sm" className="border-purple-600 text-purple-500 hover:bg-purple-500 hover:text-black" onClick={handleDownloadProposal} disabled={isDownloadingProposal || isGenerating || !!generationError}>
-            {isDownloadingProposal ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />} Unduh Proposal
-          </Button>
-          <div className="relative">
-            <Button variant="outline" size="sm" className="border-amber-600 text-amber-500 hover:bg-amber-500 hover:text-black" onClick={() => setShowShareMenu(!showShareMenu)} disabled={isSharing}>
-              {isSharing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Share2 className="h-4 w-4 mr-1" />} Bagikan
-            </Button>
-            {showShareMenu && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-                <div className="py-1">
-                  <div className="px-4 py-2 text-sm text-gray-700">
-                    {isGenerating && <div className="flex items-center"><Loader2 className="h-4 w-4 mr-2 animate-spin" /><span>Menyiapkan proposal...</span></div>}
-                    {generationError && <div className="text-red-600"><p>Gagal: {generationError}</p></div>}
-                    {!isGenerating && !generationError && (
-                      <button onClick={handleShareProposal} className="flex items-center w-full hover:text-black disabled:opacity-50" disabled={!proposalFile || isSharing}>
-                        <FileText className="h-4 w-4 mr-2" /> <span>Bagikan Proposal</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="border-t my-1"></div>
-                  <p className="px-4 pt-2 pb-1 text-xs text-gray-500">Bagikan Teks Ringkasan:</p>
-                  <button onClick={shareToWhatsApp} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                    <MessageCircle className="h-4 w-4 mr-2 text-green-600" /> WhatsApp
-                  </button>
-                  <button onClick={shareToEmail} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                    <Mail className="h-4 w-4 mr-2 text-blue-600" /> Email
-                  </button>
-                  <button onClick={copyToClipboard} className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                    {copied ? <Check className="h-4 w-4 mr-2 text-green-600" /> : <Copy className="h-4 w-4 mr-2 text-gray-600" />}
-                    {copied ? 'Tersalin!' : 'Salin Teks'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+        <ResultActions results={results} proposalFile={proposalFile} isGenerating={isGenerating} generationError={generationError} />
+      </header>
 
-      {showShareMenu && (<div className="fixed inset-0 z-40" onClick={() => setShowShareMenu(false)} />)}
-
-      <div className="bg-amber-900/20 p-4 rounded-md border border-amber-800/30 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <h3 className="text-lg font-bold text-amber-400 headline mb-2">Informasi Umum</h3>
-            <div className="space-y-2">
-              <div className="flex"><span className="text-white/70 w-28">Nama Klien:</span><span className="font-medium">{client?.name}</span></div>
-              <div className="flex"><span className="text-white/70 w-28">Jam/Tanggal:</span><span className="font-medium">{inspection.dateTime}</span></div>
-              <div className="flex"><span className="text-white/70 w-28">Metode:</span><span className="font-medium">{inspection.treatment}</span></div>
-              <div className="flex"><span className="text-white/70 w-28">Diinput oleh:</span><span className="font-medium">{agentName}</span></div>
-            </div>
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-amber-400 headline mb-2">Ringkasan Temuan</h3>
-            <div className="space-y-2">
-              <div className="flex"><span className="text-white/70 w-28">Jumlah Foto:</span><span className="font-medium">{inspection.images.length}</span></div>
-              <div className="flex items-center"><span className="text-white/70 w-28">Status:</span><span className={cn("text-white text-xs px-2 py-1 rounded-full", getStatusColor(inspection.status))}>{inspection.status}</span></div>
-            </div>
+      <section className="bg-amber-900/20 p-4 rounded-md border border-amber-800/30 mb-6 grid md:grid-cols-2 gap-4">
+        <div>
+          <h3 className="text-lg font-bold text-amber-400 mb-2">Informasi Umum</h3>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-white/70 w-28 inline-block">Klien:</span><span className="font-medium">{client?.name}</span></p>
+            <p><span className="text-white/70 w-28 inline-block">Tanggal:</span><span className="font-medium">{inspection.dateTime}</span></p>
+            <p><span className="text-white/70 w-28 inline-block">Agent:</span><span className="font-medium">{agentName}</span></p>
           </div>
         </div>
-      </div>
-
-      {inspection.images.length > 0 ? (
-        <div className="relative">
-          <div className={cn("relative overflow-hidden rounded-md transition-all duration-300 bg-black", isZoomed ? "h-[500px]" : "h-[300px]")}>
-            <AnimatePresence mode="wait">
-              <motion.div key={activeIndex} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.3 }} className="absolute inset-0">
-                <div className="relative w-full h-full">
-                  <Image loader={laravelLoader} src={inspection.images[activeIndex].url || "/placeholder.svg"} alt={`Inspeksi ${activeIndex + 1}`} fill sizes="(max-width: 768px) 100vw, 50vw" className={cn("object-contain transition-all duration-300", isZoomed ? "cursor-zoom-out" : "cursor-zoom-in")} onClick={toggleZoom} />
-                </div>
-              </motion.div>
-            </AnimatePresence>
-            <Button variant="outline" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500 no-print" onClick={prevSlide}><ChevronLeft className="h-6 w-6" /></Button>
-            <Button variant="outline" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/80 border-amber-500 no-print" onClick={nextSlide}><ChevronRight className="h-6 w-6" /></Button>
-            <Button variant="outline" size="icon" className="absolute right-2 top-2 bg-black/80 border-amber-500 no-print" onClick={toggleZoom}><ZoomIn className="h-5 w-5" /></Button>
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 z-10 no-print">
-              {inspection.images.map((_, index) => (<button key={index} onClick={() => setActiveIndex(index)} className={`w-2 h-2 rounded-full ${index === activeIndex ? "bg-amber-500" : "bg-gray-600"}`} />))}
-            </div>
-          </div>
-          <div className="mt-4 bg-black/50 p-4 rounded-md border border-amber-800/30">
-            <h3 className="font-bold text-amber-400">Deskripsi Gambar {activeIndex + 1}</h3>
-            <p className="text-white/90 whitespace-pre-line">{inspection.images[activeIndex]?.description || 'Tidak ada deskripsi.'}</p>
-          </div>
-          <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2 no-print">
-            {inspection.images.map((image, index) => (
-              <div key={image.url + index} className={cn("relative h-16 rounded-md overflow-hidden cursor-pointer border-2", activeIndex === index ? "border-amber-500" : "border-transparent hover:border-amber-500/50")} onClick={() => setActiveIndex(index)}>
-                <Image loader={laravelLoader} src={image.url || "/placeholder.svg"} alt={`Thumbnail ${index + 1}`} fill sizes="10vw" className="object-cover" />
-              </div>
-            ))}
+        <div>
+          <h3 className="text-lg font-bold text-amber-400 mb-2">Ringkasan Temuan</h3>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-white/70 w-28 inline-block">Foto:</span><span className="font-medium">{inspection.images.length}</span></p>
+            <div className="flex items-center"><span className="text-white/70 w-28">Status:</span><span className={cn("text-xs px-2 py-1 rounded-full font-semibold", getStatusColor(primaryStatus.status))}>{primaryStatus.status}</span></div>
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-amber-800/50 rounded-lg">
-          <Camera className="h-16 w-16 text-amber-500/50 mb-4" />
-          <h3 className="text-xl font-bold text-amber-400 mb-2">Tidak Ada Foto Inspeksi</h3>
-          <p className="text-white/70">Data inspeksi tidak menyertakan foto apa pun.</p>
-        </div>
-      )}
+      </section>
 
-      <div className="mt-6 bg-amber-900/20 p-4 rounded-md border border-amber-800/30">
+      <section className="mb-6">
+        <ResultImageGallery images={inspection.images} />
+      </section>
+
+      <section className="mt-6 bg-amber-900/20 p-4 rounded-md border border-amber-800/30">
         <h3 className="font-bold text-amber-400 headline mb-2">Kesimpulan & Rekomendasi</h3>
         <p className="text-white/90 whitespace-pre-line mb-4">{inspection.summary}</p>
         <div className="mt-4 p-3 bg-black/30 rounded-md">
           <h4 className="font-bold text-amber-400 mb-1">Opsi Penanganan Lanjutan:</h4>
           <p className="text-white/90 whitespace-pre-line">{inspection.recommendation}</p>
         </div>
-      </div>
-
-      <div className="mt-6 bg-gray-900/30 p-4 rounded-md border border-gray-700">
-        {renderSpecificDetails()}
-      </div>
+      </section>
     </Card>
   );
 }

@@ -11,11 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('inspection_images', function (Blueprint $table) {
+       Schema::create('settings', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('inspection_id')->constrained()->onDelete('cascade');
-            $table->string('url');
-            $table->text('description')->nullable();
+            $table->string('key')->unique();
+            $table->string('value');
             $table->timestamps();
         });
     }
@@ -25,6 +24,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('inspection_images');
+        Schema::dropIfExists('settings');
     }
 };

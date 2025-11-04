@@ -9,10 +9,15 @@ class Client extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name'];
+    protected $fillable = [
+        'name',
+        'email',
+        'phone_number',
+        'client_type_id',
+    ];
 
-    public function riskCalculations()
+    public function clientType()
     {
-        return $this->hasMany(RiskCalculation::class);
+        return $this->belongsTo(ClientType::class);
     }
 }
