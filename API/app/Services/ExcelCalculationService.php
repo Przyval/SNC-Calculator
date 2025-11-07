@@ -90,7 +90,7 @@ class ExcelCalculationService
     public function getCalculatedPrice(array $data): float
     {
         $spreadsheet = $this->getFilledSpreadsheet($data);
-        return $spreadsheet->getActiveSheet()->getCell('O17')->getCalculatedValue();
+        return $spreadsheet->getActiveSheet()->getCell('O18')->getCalculatedValue();
     }
 
     public function getComparativePrices(array $data): array
@@ -125,7 +125,7 @@ class ExcelCalculationService
             $spreadsheet = $this->getFilledSpreadsheet($tempData);
             $sheet = $spreadsheet->getActiveSheet();
 
-            $price = $sheet->getCell('O17')->getCalculatedValue();
+            $price = $sheet->getCell('O18')->getCalculatedValue();
             $quantity = 0;
             if ($chemicalToCalculate === 'Expose Soil Treatent per Liter Larutan') {
                 $quantity = $sheet->getCell('M66')->getCalculatedValue();

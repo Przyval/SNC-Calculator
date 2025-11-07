@@ -269,7 +269,6 @@ class ProposalController extends Controller
 
         if (empty($selectedChemicals)) {
             Log::warning('No TC chemicals selected, using default treatment');
-            // Fallback to single price
             $data['service_type'] = 'inject_spraying';
             $basePrice = $this->calculationService->getCalculatedPrice($data);
             $adjustedPrices = $this->applyServicePriceAdjustments('inject_spraying', $basePrice, $data['luasTanah']);
@@ -434,18 +433,6 @@ class ProposalController extends Controller
                 Log::error("Failed to generate proposal for {$serviceType}: " . $e->getMessage());
                 // Continue with other services
             }
-            
-            // Generate contract (optional - only if you want separate contracts)
-            // Comment out if you don't need separate contract documents
-            /* 
-            try {
-                $contractPath = $this->generateDocument('contract', $serviceType, $validated, $priceData, $separatedItems);
-                $documents[] = $contractPath;
-                Log::info("Generated contract for {$serviceType}: {$contractPath}");
-            } catch (\Exception $e) {
-                Log::warning("Contract generation skipped for {$serviceType}: " . $e->getMessage());
-            }
-            */
         }
         
         if (empty($documents)) {
@@ -505,7 +492,13 @@ class ProposalController extends Controller
         
         $this->processImages($template, $validated['images'] ?? []);
         
-        $this->fillPriceComparison($template, $priceData, $serviceType, $validated['area_treatment']);
+        if ($serviceType === 'TC' && count($priceData['options']) > 1) {
+            $this->fillChemicalAndPriceBlocks($template, $priceData['options'], $validated['area_treatment']);
+            $template->setValue('final_price', '');
+            $template->setValue('psychological_price', '');
+        } else {
+            $this->fillPriceComparison($template, $priceData, $serviceType, $validated['area_treatment']);
+        }
         
         $this->fillMaterialList($template, $separatedItems[$serviceType] ?? []);
         
@@ -884,6 +877,7 @@ class ProposalController extends Controller
             try {
                 $template->setValue($placeholder, '');
             } catch (\Exception $e) {
+                // Ignore errors for placeholders that may not exist in all templates
             }
         }
     }
@@ -898,5 +892,122 @@ class ProposalController extends Controller
         $cleanClientName = preg_replace('/[^A-Za-z0-9\-]/', '', str_replace(' ', '-', $clientName));
         $timestamp = date('Y-m-d_H-i-s');
         return "{$documentType}_{$serviceType}_{$cleanClientName}_{$timestamp}.docx";
+    }
+
+    private function fillChemicalAndPriceBlocks(TemplateProcessor $template, array $options, float $area): void
+    {
+        $chemicalDetails = [
+            'Expose Soil Treatent per Liter Larutan' => [
+                'name' => 'Expose 55 SC',
+                'desc_1' => 'Bahan aktif Fipronil yang bersifat racun perut dan racun kontak.',
+                'desc_2' => 'Dosis 5-10 ml/L',
+                'desc_3' => 'Konsentrasi 5,5 %',
+                'image' => storage_path('app/templates/images/expose.png'),
+                'treatment_name' => 'Pipanisasi & Spraying Chemical Expose by KRISTAL',
+            ],
+            'Agenda Soil Treatent per Liter Larutan' => [
+                'name' => 'Agenda 25 EC',
+                'desc_1' => 'Bahan aktif Fipronil',
+                'desc_2' => 'Efektif membasmi rayap hingga ke ratunya (Koloni Eliminasi)',
+                'desc_3' => 'Dosis 10 ml/L',
+                'image' => storage_path('app/templates/images/agenda.png'),
+                'treatment_name' => 'Pipanisasi & Spraying Chemical Agenda by Envu Indonesia',
+            ],
+            'Premise Soil Treatent per Liter Larutan' => [
+                'name' => 'Premise 200 SL',
+                'desc_1' => 'Bahan aktif Imidakloprid',
+                'desc_2' => 'Non-repellent...',
+                'desc_3' => 'Dosis 2.5 ml/L',
+                'image' => storage_path('app/templates/images/premise.png'),
+                'treatment_name' => 'Pipanisasi & Spraying Chemical Premise by Envu Indonesia',
+            ],
+        ];
+
+        $chemCount = count($options);
+
+        try {
+            $template->cloneBlock('chemical_block', $chemCount, true, true);
+            Log::info("Cloned chemical_block successfully", ['count' => $chemCount]);
+
+            $i = 1;
+            foreach ($options as $option) {
+                $chemicalKey = $option['name'];
+                if (isset($chemicalDetails[$chemicalKey])) {
+                    $details = $chemicalDetails[$chemicalKey];
+
+                    $template->setValue("chem_name#{$i}", $details['name']);
+                    $template->setValue("chem_desc_1#{$i}", $details['desc_1']);
+                    $template->setValue("chem_desc_2#{$i}", $details['desc_2']);
+                    $template->setValue("chem_desc_3#{$i}", $details['desc_3']);
+
+                    if (file_exists($details['image'])) {
+                        $template->setImageValue("chem_image#{$i}", [
+                            'path' => $details['image'], 'width' => 150, 'height' => 150, 'ratio' => false
+                        ]);
+                    }
+                    Log::info("Successfully filled chemical_block #{$i}");
+                }
+                $i++;
+            }
+        } catch (\Exception $e) {
+            Log::error("Failed to process chemical_block: " . $e->getMessage());
+        }
+
+        try {
+            $rowData = $this->preparePriceRowDataForTC($options, $chemicalDetails);
+            $template->cloneRowAndSetValues('price_block_counter', $rowData);
+            Log::info("Cloned price table rows successfully using cloneRowAndSetValues.");
+        } catch (\Exception $e) {
+            Log::warning("cloneRowAndSetValues failed, trying cloneBlock as fallback: " . $e->getMessage());
+            try {
+                $template->cloneBlock('price_block', $chemCount, true, false);
+                $this->fillPriceBlockManuallyForTC($template, $options, $chemicalDetails);
+            } catch (\Exception $e2) {
+                Log::error("Both price table cloning methods failed: " . $e2->getMessage());
+            }
+        }
+    }
+
+    private function preparePriceRowDataForTC(array $options, array $chemicalDetails): array
+    {
+        $rowData = [];
+        $i = 1;
+        foreach ($options as $option) {
+            $chemicalKey = $option['name'];
+            if (isset($chemicalDetails[$chemicalKey])) {
+                $details = $chemicalDetails[$chemicalKey];
+                $rowData[] = [
+                    'price_block_counter' => (string) $i,
+                    'price_treatment_name' => htmlspecialchars($details['treatment_name'], ENT_XML1),
+                    'price_psychological' => 'Rp ' . number_format($option['psychological_price'], 0, ',', '.'),
+                    'price_final' => 'Rp ' . number_format($option['final_price'], 0, ',', '.'),
+                    'price_guarantee' => $option['guarantee_period'],
+                ];
+                $i++;
+            }
+        }
+        return $rowData;
+    }
+
+    private function fillPriceBlockManuallyForTC(TemplateProcessor $template, array $options, array $chemicalDetails): void
+    {
+        $i = 1;
+        foreach ($options as $option) {
+            $chemicalKey = $option['name'];
+            if (isset($chemicalDetails[$chemicalKey])) {
+                $details = $chemicalDetails[$chemicalKey];
+                try {
+                    $template->setValue("price_block_counter#{$i}", (string) $i);
+                    $template->setValue("price_treatment_name#{$i}", htmlspecialchars($details['treatment_name'], ENT_XML1));
+                    $template->setValue("price_final#{$i}", 'Rp ' . number_format($option['final_price'], 0, ',', '.'));
+                    $template->setValue("price_psychological#{$i}", 'Rp ' . number_format($option['psychological_price'], 0, ',', '.'));
+                    $template->setValue("price_guarantee#{$i}", $option['guarantee_period']);
+                    Log::info("Successfully filled price_block (manual) #{$i}");
+                } catch (\Exception $e) {
+                    Log::error("Failed to fill price_block (manual) #{$i}: " . $e->getMessage());
+                }
+                $i++;
+            }
+        }
     }
 }
