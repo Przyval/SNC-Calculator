@@ -113,13 +113,13 @@ const useProposalGenerator = (results: UnifiedResultData, accessToken?: string) 
 
     console.log('Sending proposal request:', apiPayload);
 
-    const laravelApiUrl = process.env.NEXT_PUBLIC_LARAVEL_API_URL || 'http://localhost:8000';
-    const response = await fetch(`${laravelApiUrl}/api/generate-propose`, {
+    const laravelApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const response = await fetch(`${laravelApiUrl}/generate-propose`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/zip',
+        'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       },
       body: JSON.stringify(apiPayload),
     });
@@ -131,7 +131,7 @@ const useProposalGenerator = (results: UnifiedResultData, accessToken?: string) 
 
     const blob = await response.blob();
     const contentDisposition = response.headers.get('content-disposition');
-    let filename = `Proposal_${apiPayload.client_name.replace(/ /g, '_')}.zip`;
+    let filename = `Proposal_${apiPayload.client_name.replace(/ /g, '_')}.docx`;
     if (contentDisposition) {
       const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
       if (filenameMatch?.[1]) filename = filenameMatch[1];
@@ -237,7 +237,7 @@ const ResultActions: FC<{ results: UnifiedResultData, proposalFile: ProposalFile
           </>
         ) : (
           <>
-            <Download className="h-4 w-4 mr-1" /> Unduh Proposal
+            <Download className="h-4 w-4 mr-1" /> Unduh Dokumen
           </>
         )}
       </Button>

@@ -3,8 +3,17 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Bug, Rat, SprayCan, Calculator } from "lucide-react";
+import { Bug, Rat, SprayCan, Calculator, AlertCircle } from "lucide-react";
 import { Session } from "next-auth";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import {
     type ServiceType,
@@ -59,6 +68,8 @@ export default function DynamicControlForm({ client, session, serviceTypes, onFo
         recommendation: "Direkomendasikan penanganan sesuai dengan SOP dan monitoring berkala."
     });
 
+    const [validationError, setValidationError] = useState<string | null>(null);
+
     const handleDetailChange = <T extends keyof AllServiceDetails>(section: T, field: keyof AllServiceDetails[T], value: any) => {
         setFormData(prev => ({
             ...prev,
@@ -75,8 +86,19 @@ export default function DynamicControlForm({ client, session, serviceTypes, onFo
 
     const handleSubmit = () => {
         if (!formData.common.lokasiRumah?.trim()) {
-            alert("Alamat properti tidak boleh kosong.");
+            setValidationError("Alamat properti tidak boleh kosong.");
             return;
+        }
+
+        // Validate TC chemical selection for non-baiting treatments
+        if (serviceTypes.includes('TC') && formData.TC?.treatment !== 'Baiting') {
+            const selectedChemicals = Object.keys(formData.common.preparationSet || {}).filter(item =>
+                autoCalcChemicals.includes(item)
+            );
+            if (selectedChemicals.length === 0) {
+                setValidationError("Untuk treatment Termite Control (selain Baiting), Anda harus memilih minimal satu chemical: Expose, Agenda, atau Premise Soil Treatment.");
+                return;
+            }
         }
 
         const finalDetails: AllServiceDetails = {
@@ -207,6 +229,25 @@ export default function DynamicControlForm({ client, session, serviceTypes, onFo
                 <Calculator className="mr-2 h-5 w-5" />
                 Lanjutkan
             </Button>
+
+            <AlertDialog open={!!validationError} onOpenChange={() => setValidationError(null)}>
+                <AlertDialogContent className="bg-black/95 border-red-500 text-white">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2 text-red-500">
+                            <AlertCircle className="h-5 w-5" />
+                            Validasi Form
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-white/90">
+                            {validationError}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogAction className="bg-red-500 hover:bg-red-600 text-white">
+                            Mengerti
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </Card>
     );
 }

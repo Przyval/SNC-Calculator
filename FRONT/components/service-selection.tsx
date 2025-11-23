@@ -51,9 +51,47 @@ export default function ServiceSelection({ onServiceSelected }: ServiceSelection
         return prevSelected.filter((s) => s !== serviceType);
       }
       else {
-        return [...prevSelected, serviceType];
+        if (serviceType === 'TC') {
+          return ['TC'];
+        }
+        
+        const withoutTC = prevSelected.filter(s => s !== 'TC');
+        
+        if (serviceType === 'RC') {
+          return [...withoutTC.filter(s => s !== 'GPC'), serviceType];
+        }
+        
+        if (serviceType === 'GPC') {
+          return [...withoutTC.filter(s => s !== 'RC'), serviceType];
+        }
+        
+        if (serviceType === 'GPRC') {
+          return [...withoutTC, serviceType];
+        }
+        
+        return [...withoutTC, serviceType];
       }
     });
+  };
+
+  const isServiceDisabled = (serviceType: ServiceType) => {
+    if (selectedServices.includes('TC') && serviceType !== 'TC') {
+      return true;
+    }
+    
+    if (serviceType === 'TC' && selectedServices.some(s => s !== 'TC')) {
+      return true;
+    }
+    
+    if (serviceType === 'GPC' && selectedServices.includes('RC')) {
+      return true;
+    }
+    
+    if (serviceType === 'RC' && selectedServices.includes('GPC')) {
+      return true;
+    }
+    
+    return false;
   };
 
   const handleContinue = () => {
@@ -71,16 +109,21 @@ export default function ServiceSelection({ onServiceSelected }: ServiceSelection
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
         {serviceOptions.map((service) => {
           const isSelected = selectedServices.includes(service.type);
+          const isDisabled = isServiceDisabled(service.type);
           return (
             <div
               key={service.type}
-              onClick={() => handleToggleService(service.type)}
+              onClick={() => !isDisabled && handleToggleService(service.type)}
               className={`
                 group relative p-6 bg-gray-900/50 rounded-lg border-2 
-                transition-all duration-300 cursor-pointer transform hover:-translate-y-2
+                transition-all duration-300 transform
+                ${isDisabled 
+                  ? 'opacity-40 cursor-not-allowed border-gray-800'
+                  : 'cursor-pointer hover:-translate-y-2'
+                }
                 ${isSelected 
                   ? 'border-amber-500 bg-amber-900/30'
-                  : 'border-gray-700 hover:border-amber-500 hover:bg-gray-900'
+                  : !isDisabled ? 'border-gray-700 hover:border-amber-500 hover:bg-gray-900' : 'border-gray-800'
                 }
               `}
             >

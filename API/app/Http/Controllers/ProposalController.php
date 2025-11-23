@@ -10,7 +10,7 @@ use Intervention\Image\ImageManager;
 use Intervention\Image\Laravel\Facades\Image;
 use PhpOffice\PhpWord\TemplateProcessor;
 use App\Services\ExcelCalculationService;
-use ZipArchive;
+
 
 class ProposalController extends Controller
 {
@@ -43,6 +43,11 @@ class ProposalController extends Controller
         'Racumin Block Perangkap Masal',
         'Unit Glue Box Segitiga',
         'Racumin Glue Box Segitiga',
+    ];
+
+    private array $baitingItems = [
+        'Xterm AG Station',
+        'Xterm IG Station',
     ];
 
     private array $gpcItems = [
@@ -122,38 +127,38 @@ class ProposalController extends Controller
 
         Log::info('Separated items by service:', $separatedItems);
 
-        $allServicePrices = [];
-        
-        foreach ($serviceTypes as $serviceType) {
-            Log::info("Calculating prices for service: {$serviceType}");
-            
-            try {
-                $serviceData = $this->prepareServiceData($validated, $serviceType, $separatedItems);
-                $prices = $this->calculateServicePrices($serviceType, $serviceData);
-                
-                $allServicePrices[$serviceType] = $prices;
-                
-                Log::info("Prices calculated for {$serviceType}:", $prices);
-            } catch (\Exception $e) {
-                Log::error("Failed to calculate prices for {$serviceType}: " . $e->getMessage());
-                return response()->json([
-                    'error' => "Failed to calculate prices for {$serviceType}",
-                    'message' => $e->getMessage()
-                ], 500);
+        // Check for combination services that need price comparison
+        $needsPriceComparison = $this->needsPriceComparison($serviceTypes);
+
+        if ($needsPriceComparison) {
+            $priceComparison = $this->calculateCombinationPrices($validated, $separatedItems, $serviceTypes);
+        } else {
+            $allServicePrices = [];
+            foreach ($serviceTypes as $serviceType) {
+                Log::info("Calculating prices for service: {$serviceType}");
+                try {
+                    $serviceData = $this->prepareServiceData($validated, $serviceType, $separatedItems);
+                    $prices = $this->calculateServicePrices($serviceType, $serviceData);
+                    $allServicePrices[$serviceType] = $prices;
+                    Log::info("Prices calculated for {$serviceType}:", $prices);
+                } catch (\Exception $e) {
+                    Log::error("Failed to calculate prices for {$serviceType}: " . $e->getMessage());
+                    return response()->json([
+                        'error' => "Failed to calculate prices for {$serviceType}",
+                        'message' => $e->getMessage()
+                    ], 500);
+                }
             }
+            $priceComparison = $allServicePrices;
         }
 
         try {
-            $documents = $this->generateDocuments($validated, $allServicePrices, $separatedItems);
-            $zipPath = $this->createZipArchive($validated['client_name'], $documents, $serviceTypes);
-            $this->cleanupTempFiles($documents);
-            
-            return response()->download($zipPath)->deleteFileAfterSend(true);
-            
+            $documentPath = $this->generateSingleDocument($validated, $priceComparison, $separatedItems, $serviceTypes, $needsPriceComparison);
+            return response()->download($documentPath)->deleteFileAfterSend(true);
         } catch (\Exception $e) {
             Log::error('Document generation failed: ' . $e->getMessage());
             return response()->json([
-                'error' => 'Failed to generate documents',
+                'error' => 'Failed to generate document',
                 'message' => $e->getMessage()
             ], 500);
         }
@@ -235,15 +240,15 @@ class ProposalController extends Controller
             case 'TC':
                 $result['options'] = $this->calculateTCPrices($serviceData);
                 break;
-                
+
             case 'GPC':
                 $result['options'] = $this->calculateGPCPrices($serviceData);
                 break;
-                
+
             case 'RC':
                 $result['options'] = $this->calculateRCPrices($serviceData);
                 break;
-                
+
             case 'GPRC':
                 $result['options'] = $this->calculateGPRCPrices($serviceData);
                 break;
@@ -272,27 +277,29 @@ class ProposalController extends Controller
             $data['service_type'] = 'inject_spraying';
             $basePrice = $this->calculationService->getCalculatedPrice($data);
             $adjustedPrices = $this->applyServicePriceAdjustments('inject_spraying', $basePrice, $data['luasTanah']);
-            
-            return [[
-                'name' => 'Standard Treatment',
-                'treatment' => 'inject_spraying',
-                'base_price' => $basePrice,
-                'final_price' => $adjustedPrices['final_price'],
-                'psychological_price' => $adjustedPrices['psychological_price'],
-                'guarantee_period' => $this->getGuaranteePeriod('inject_spraying'),
-            ]];
+
+            return [
+                [
+                    'name' => 'Standard Treatment',
+                    'treatment' => 'inject_spraying',
+                    'base_price' => $basePrice,
+                    'final_price' => $adjustedPrices['final_price'],
+                    'psychological_price' => $adjustedPrices['psychological_price'],
+                    'guarantee_period' => $this->getGuaranteePeriod('inject_spraying'),
+                ]
+            ];
         }
 
         // Get comparative prices for selected chemicals
         $data['service_type'] = 'inject_spraying';
         $comparisonResults = $this->calculationService->getComparativePrices($data);
-        
+
         $options = [];
         foreach ($comparisonResults as $chemical => $priceData) {
             $adjustedPrices = $this->applyServicePriceAdjustments('inject_spraying', $priceData['price'], $data['luasTanah']);
-            
+
             $chemicalDetails = $this->getChemicalDetails($chemical);
-            
+
             $options[] = [
                 'name' => $chemical,
                 'display_name' => $chemicalDetails['name'],
@@ -305,7 +312,7 @@ class ProposalController extends Controller
                 'description' => $chemicalDetails['description'],
             ];
         }
-        
+
         return $options;
     }
 
@@ -317,17 +324,19 @@ class ProposalController extends Controller
         $data['service_type'] = 'general_pest_control';
         $basePrice = $this->calculationService->getCalculatedPrice($data);
         $adjustedPrices = $this->applyServicePriceAdjustments('general_pest_control', $basePrice, $data['luasTanah']);
-        
-        return [[
-            'name' => 'General Pest Control',
-            'display_name' => 'Pengendalian Hama Umum',
-            'treatment' => 'general_pest_control',
-            'base_price' => $basePrice,
-            'final_price' => $adjustedPrices['final_price'],
-            'psychological_price' => $adjustedPrices['psychological_price'],
-            'guarantee_period' => '1 tahun',
-            'description' => 'Layanan pengendalian hama umum (kecoa, semut, lalat, nyamuk, dll)',
-        ]];
+
+        return [
+            [
+                'name' => 'General Pest Control',
+                'display_name' => 'Pengendalian Hama Umum',
+                'treatment' => 'general_pest_control',
+                'base_price' => $basePrice,
+                'final_price' => $adjustedPrices['final_price'],
+                'psychological_price' => $adjustedPrices['psychological_price'],
+                'guarantee_period' => '1 tahun',
+                'description' => 'Layanan pengendalian hama umum (kecoa, semut, lalat, nyamuk, dll)',
+            ]
+        ];
     }
 
     /**
@@ -338,17 +347,19 @@ class ProposalController extends Controller
         $data['service_type'] = 'baiting';
         $basePrice = $this->calculationService->getCalculatedPrice($data);
         $adjustedPrices = $this->applyServicePriceAdjustments('baiting', $basePrice, $data['luasTanah']);
-        
-        return [[
-            'name' => 'Rodent Control - Baiting',
-            'display_name' => 'Pengendalian Tikus - Umpan',
-            'treatment' => 'baiting',
-            'base_price' => $basePrice,
-            'final_price' => $adjustedPrices['final_price'],
-            'psychological_price' => $adjustedPrices['psychological_price'],
-            'guarantee_period' => '1 tahun',
-            'description' => 'Pengendalian tikus menggunakan metode umpan racun',
-        ]];
+
+        return [
+            [
+                'name' => 'Rodent Control - Baiting',
+                'display_name' => 'Pengendalian Tikus - Umpan',
+                'treatment' => 'baiting',
+                'base_price' => $basePrice,
+                'final_price' => $adjustedPrices['final_price'],
+                'psychological_price' => $adjustedPrices['psychological_price'],
+                'guarantee_period' => '1 tahun',
+                'description' => 'Pengendalian tikus menggunakan metode umpan racun',
+            ]
+        ];
     }
 
     /**
@@ -364,7 +375,7 @@ class ProposalController extends Controller
             array_flip($this->gpcItems)
         );
         $gpcBasePrice = $this->calculationService->getCalculatedPrice($gpcData);
-        
+
         // Calculate RC component
         $rcData = $data;
         $rcData['service_type'] = 'baiting';
@@ -373,24 +384,26 @@ class ProposalController extends Controller
             array_flip($this->rcItems)
         );
         $rcBasePrice = $this->calculationService->getCalculatedPrice($rcData);
-        
+
         // Bundle discount: 10% off total
         $bundleBasePrice = ($gpcBasePrice + $rcBasePrice) * 0.9;
         $adjustedPrices = $this->applyServicePriceAdjustments('gprc_bundle', $bundleBasePrice, $data['luasTanah']);
-        
-        return [[
-            'name' => 'GPRC Bundle (GPC + RC)',
-            'display_name' => 'Paket GPRC (Hama Umum + Tikus)',
-            'treatment' => 'gprc_bundle',
-            'base_price' => $bundleBasePrice,
-            'final_price' => $adjustedPrices['final_price'],
-            'psychological_price' => $adjustedPrices['psychological_price'],
-            'gpc_component' => $gpcBasePrice,
-            'rc_component' => $rcBasePrice,
-            'discount_percentage' => 10,
-            'guarantee_period' => '1 tahun',
-            'description' => 'Paket bundling pengendalian hama umum dan tikus dengan diskon 10%',
-        ]];
+
+        return [
+            [
+                'name' => 'GPRC Bundle (GPC + RC)',
+                'display_name' => 'Paket GPRC (Hama Umum + Tikus)',
+                'treatment' => 'gprc_bundle',
+                'base_price' => $bundleBasePrice,
+                'final_price' => $adjustedPrices['final_price'],
+                'psychological_price' => $adjustedPrices['psychological_price'],
+                'gpc_component' => $gpcBasePrice,
+                'rc_component' => $rcBasePrice,
+                'discount_percentage' => 10,
+                'guarantee_period' => '1 tahun',
+                'description' => 'Paket bundling pengendalian hama umum dan tikus dengan diskon 10%',
+            ]
+        ];
     }
 
     /**
@@ -417,106 +430,209 @@ class ProposalController extends Controller
     }
 
     /**
-     * Generate all documents (proposals and contracts)
+     * Check if service combination needs price comparison
      */
-    private function generateDocuments(array $validated, array $allServicePrices, array $separatedItems): array
+    private function needsPriceComparison(array $serviceTypes): bool
     {
-        $documents = [];
-        
-        foreach ($allServicePrices as $serviceType => $priceData) {
-            // Generate proposal (always generate)
-            try {
-                $proposalPath = $this->generateDocument('proposal', $serviceType, $validated, $priceData, $separatedItems);
-                $documents[] = $proposalPath;
-                Log::info("Generated proposal for {$serviceType}: {$proposalPath}");
-            } catch (\Exception $e) {
-                Log::error("Failed to generate proposal for {$serviceType}: " . $e->getMessage());
-                // Continue with other services
-            }
+        // TC always has price comparison (except baiting)
+        if (count($serviceTypes) === 1 && in_array('TC', $serviceTypes)) {
+            return true;
         }
-        
-        if (empty($documents)) {
-            throw new \Exception("No documents were generated successfully");
+
+        // GPC + GPRC combination needs price comparison
+        if (
+            count($serviceTypes) === 2 &&
+            in_array('GPC', $serviceTypes) &&
+            in_array('GPRC', $serviceTypes)
+        ) {
+            return true;
         }
-        
-        return $documents;
+
+        // RC + GPRC combination needs price comparison  
+        if (
+            count($serviceTypes) === 2 &&
+            in_array('RC', $serviceTypes) &&
+            in_array('GPRC', $serviceTypes)
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
-     * Generate a single document (proposal or contract)
+     * Calculate prices for combination services
      */
-    private function generateDocument(string $docType, string $serviceType, array $validated, array $priceData, array $separatedItems): string
+    private function calculateCombinationPrices(array $validated, array $separatedItems, array $serviceTypes): array
     {
-        $templateMap = [
-            'TC' => 'inject_spraying',
-            'GPC' => 'pengendalian_kecoa',
-            'RC' => 'baiting',
-            'GPRC' => 'integrated_pest_management_(gprc)',
+        if (count($serviceTypes) === 1 && in_array('TC', $serviceTypes)) {
+            // Handle TC price comparison
+            $serviceData = $this->prepareServiceData($validated, 'TC', $separatedItems);
+            $result = $this->calculateServicePrices('TC', $serviceData);
+            $result['area_treatment'] = $validated['area_treatment'];
+            return $result;
+        }
+
+        if (
+            count($serviceTypes) === 2 &&
+            in_array('GPC', $serviceTypes) &&
+            in_array('GPRC', $serviceTypes)
+        ) {
+            return $this->calculateGPCGPRCComparison($validated, $separatedItems);
+        }
+
+        if (
+            count($serviceTypes) === 2 &&
+            in_array('RC', $serviceTypes) &&
+            in_array('GPRC', $serviceTypes)
+        ) {
+            return $this->calculateRCGPRCComparison($validated, $separatedItems);
+        }
+
+        return [];
+    }
+
+    /**
+     * Calculate GPC + GPRC price comparison
+     */
+    private function calculateGPCGPRCComparison(array $validated, array $separatedItems): array
+    {
+        $options = [];
+
+        // GPC option
+        $gpcData = $this->prepareServiceData($validated, 'GPC', $separatedItems);
+        $gpcData['service_type'] = 'general_pest_control';
+        $gpcBasePrice = $this->calculationService->getCalculatedPrice($gpcData);
+        $gpcAdjusted = $this->applyServicePriceAdjustments('general_pest_control', $gpcBasePrice, $validated['area_treatment']);
+
+        $options[] = [
+            'target_name' => 'serangga kecoa, semut, nyamuk, lalat',
+            'final_price' => $gpcAdjusted['final_price'],
+            'psychological_price' => $gpcAdjusted['psychological_price'],
         ];
 
-        $serviceDetails = $validated['service_details'][$serviceType] ?? [];
+        // GPRC option
+        $gprcData = $this->prepareServiceData($validated, 'GPRC', $separatedItems);
+        $gprcPrices = $this->calculateGPRCPrices($gprcData);
 
-        if ($serviceType === 'TC' && isset($serviceDetails['treatment'])) {
-            $tcTreatment = strtolower(str_replace('_', '_', $serviceDetails['treatment']));
-            $availableTemplates = ['pipanasi', 'refill_pipanasi', 'spraying', 'inject_spraying'];
-            if (in_array($tcTreatment, $availableTemplates)) {
-                $templateMap['TC'] = $tcTreatment;
-            }
-        }
+        $options[] = [
+            'target_name' => 'serangga kecoa, semut, nyamuk, lalat, tikus',
+            'final_price' => $gprcPrices['options'][0]['final_price'],
+            'psychological_price' => $gprcPrices['options'][0]['psychological_price'],
+        ];
 
-        if ($serviceType === 'RC' && isset($serviceDetails['treatment']) && is_array($serviceDetails['treatment'])) {
-            if (in_array('baiting', $serviceDetails['treatment']) && in_array('trapping', $serviceDetails['treatment'])) {
-                $templateMap['RC'] = 'baiting_&_trapping';
-            } elseif (in_array('baiting', $serviceDetails['treatment'])) {
-                $templateMap['RC'] = 'baiting';
-            }
-        }
+        return ['options' => $options];
+    }
 
-        $templateName = $templateMap[$serviceType] ?? 'general_template';
+    /**
+     * Calculate RC + GPRC price comparison
+     */
+    private function calculateRCGPRCComparison(array $validated, array $separatedItems): array
+    {
+        $options = [];
+
+        // RC option
+        $rcData = $this->prepareServiceData($validated, 'RC', $separatedItems);
+        $rcPrices = $this->calculateRCPrices($rcData);
+
+        $options[] = [
+            'target_name' => 'tikus',
+            'final_price' => $rcPrices['options'][0]['final_price'],
+            'psychological_price' => $rcPrices['options'][0]['psychological_price'],
+        ];
+
+        // GPRC option
+        $gprcData = $this->prepareServiceData($validated, 'GPRC', $separatedItems);
+        $gprcPrices = $this->calculateGPRCPrices($gprcData);
+
+        $options[] = [
+            'target_name' => 'serangga kecoa, semut, nyamuk, lalat, tikus',
+            'final_price' => $gprcPrices['options'][0]['final_price'],
+            'psychological_price' => $gprcPrices['options'][0]['psychological_price'],
+        ];
+
+        return ['options' => $options];
+    }
+
+    /**
+     * Generate single document instead of multiple
+     */
+    private function generateSingleDocument(array $validated, array $priceData, array $separatedItems, array $serviceTypes, bool $needsPriceComparison): string
+    {
+        // Determine template based on service combination
+        $templateName = $this->getTemplateForCombination($serviceTypes, $validated);
         $templatePath = storage_path("app/templates/{$templateName}.docx");
-        
+
         if (!file_exists($templatePath)) {
             $templatePath = storage_path("app/templates/general_template.docx");
             $templateName = 'general_template';
         }
-        
+
         if (!file_exists($templatePath)) {
             throw new \Exception("Template not found: {$templateName}.docx and no general_template.docx fallback available");
         }
 
-        Log::info("Using template: {$templateName}.docx for service: {$serviceType}");
+        Log::info("Using template: {$templateName}.docx for services: " . implode(', ', $serviceTypes));
 
         $template = new TemplateProcessor($templatePath);
-        
-        $this->fillGeneralAttributes($template, $validated, $serviceType, $serviceDetails);
-        
+
+        $this->fillGeneralAttributes($template, $validated, implode('_', $serviceTypes), $validated['service_details'] ?? []);
         $this->processImages($template, $validated['images'] ?? []);
-        
-        if ($serviceType === 'TC' && count($priceData['options']) > 1) {
-            $this->fillChemicalAndPriceBlocks($template, $priceData['options'], $validated['area_treatment']);
-            $template->setValue('final_price', '');
-            $template->setValue('psychological_price', '');
+
+        if ($needsPriceComparison) {
+            $this->fillCombinationPriceComparison($template, $priceData, $serviceTypes);
         } else {
-            $this->fillPriceComparison($template, $priceData, $serviceType, $validated['area_treatment']);
+            $this->fillRegularPrices($template, $priceData, $serviceTypes);
         }
-        
-        $this->fillMaterialList($template, $separatedItems[$serviceType] ?? []);
-        
-        $this->fillServiceSpecificDetails($template, $serviceType, $serviceDetails);
-        
+
+        $this->fillCombinedMaterialList($template, $separatedItems, $serviceTypes);
+        $this->fillCombinedServiceDetails($template, $serviceTypes, $validated['service_details'] ?? []);
+
+        // Clear unused placeholders at the very end
         $this->clearUnusedPlaceholders($template);
-        
-        $outputFilename = $this->generateOutputFilename($docType, $serviceType, $validated['client_name']);
+
+        $outputFilename = $this->generateCombinedOutputFilename($serviceTypes, $validated['client_name']);
         $outputPath = storage_path("app/generated/{$outputFilename}");
-        
+
         if (!file_exists(dirname($outputPath))) {
             mkdir(dirname($outputPath), 0755, true);
         }
-        
+
         $template->saveAs($outputPath);
-        
         return $outputPath;
     }
+
+    /**
+     * Get template name for service combination
+     */
+    private function getTemplateForCombination(array $serviceTypes, array $validated): string
+    {
+        if (count($serviceTypes) === 1) {
+            $serviceType = $serviceTypes[0];
+            $templateMap = [
+                'TC' => 'inject_spraying',
+                'GPC' => 'pengendalian_kecoa',
+                'RC' => 'baiting',
+                'GPRC' => 'integrated_pest_management_(gprc)',
+            ];
+
+            // Handle TC treatment variations
+            if ($serviceType === 'TC' && isset($validated['service_details']['TC']['treatment'])) {
+                $tcTreatment = strtolower(str_replace('_', '_', $validated['service_details']['TC']['treatment']));
+                $availableTemplates = ['pipanasi', 'refill_pipanasi', 'spraying', 'inject_spraying', 'baiting'];
+                if (in_array($tcTreatment, $availableTemplates)) {
+                    return $tcTreatment;
+                }
+            }
+
+            return $templateMap[$serviceType] ?? 'general_template';
+        }
+
+        // For combinations, use integrated template
+        return 'integrated_pest_management_(gprc)';
+    }
+
+
 
     /**
      * Fill price comparison data in template
@@ -524,21 +640,21 @@ class ProposalController extends Controller
     private function fillPriceComparison(TemplateProcessor $template, array $priceData, string $serviceType, float $area): void
     {
         $options = $priceData['options'];
-        
+
         if (count($options) > 1) {
             // Multiple options - create comparison table
             try {
                 $template->cloneBlock('price_comparison_block', count($options), true, true);
-                
+
                 foreach ($options as $i => $option) {
                     $index = $i + 1;
-                    
+
                     $template->setValue("option_name#{$index}", $option['display_name'] ?? $option['name']);
                     $template->setValue("option_description#{$index}", $option['description'] ?? '');
                     $template->setValue("option_final_price#{$index}", 'Rp ' . number_format($option['final_price'], 0, ',', '.'));
                     $template->setValue("option_psychological_price#{$index}", 'Rp ' . number_format($option['psychological_price'], 0, ',', '.'));
                     $template->setValue("option_guarantee#{$index}", $option['guarantee_period']);
-                    
+
                     if (isset($option['quantity_liter'])) {
                         $template->setValue("option_quantity#{$index}", $option['quantity_liter'] . ' Liter');
                     }
@@ -549,14 +665,14 @@ class ProposalController extends Controller
         } else {
             // Single option
             $option = $options[0];
-            
+
             $template->setValue('service_name', $option['display_name'] ?? $option['name']);
             $template->setValue('service_description', $option['description'] ?? '');
             $template->setValue('final_price', 'Rp ' . number_format($option['final_price'], 0, ',', '.'));
             $template->setValue('psychological_price', 'Rp ' . number_format($option['psychological_price'], 0, ',', '.'));
             $template->setValue('guarantee_period', $option['guarantee_period']);
             $template->setValue('area_treatment', $area);
-            
+
             // Remove comparison block if exists
             try {
                 $template->cloneBlock('price_comparison_block', 0);
@@ -573,14 +689,14 @@ class ProposalController extends Controller
     {
         $prepItems = $serviceItems['preparation'] ?? [];
         $addItems = $serviceItems['additional'] ?? [];
-        
+
         $allItems = array_merge($prepItems, $addItems);
         $itemCount = count($allItems);
-        
+
         if ($itemCount > 0) {
             try {
                 $template->cloneBlock('material_list_block', $itemCount, true, true);
-                
+
                 $i = 1;
                 foreach ($allItems as $itemName => $quantity) {
                     $template->setValue("material_name#{$i}", $itemName);
@@ -600,39 +716,94 @@ class ProposalController extends Controller
     }
 
     /**
-     * Create ZIP archive with all documents
+     * Fill combination price comparison
      */
-    private function createZipArchive(string $clientName, array $documents, array $serviceTypes): string
+    private function fillCombinationPriceComparison(TemplateProcessor $template, array $priceData, array $serviceTypes): void
     {
-        $cleanClientName = preg_replace('/[^A-Za-z0-9\-]/', '', str_replace(' ', '-', $clientName));
-        $serviceString = implode('_', $serviceTypes);
-        $zipFileName = "documents_{$serviceString}_{$cleanClientName}_" . date('Y-m-d') . ".zip";
-        $zipPath = storage_path("app/generated/{$zipFileName}");
+        if (count($serviceTypes) === 1 && in_array('TC', $serviceTypes)) {
+            // Handle TC price comparison (existing logic)
+            if (count($priceData['options']) > 1) {
+                $this->fillChemicalAndPriceBlocks($template, $priceData['options'], $priceData['area_treatment'] ?? 0);
+                $template->setValue('final_price', '');
+                $template->setValue('psychological_price', '');
+            } else {
+                $this->fillPriceComparison($template, $priceData, 'TC', $priceData['area_treatment'] ?? 0);
+            }
+        } else {
+            // Handle GPC+GPRC or RC+GPRC combinations
+            $options = $priceData['options'];
+            try {
+                $template->cloneBlock('price_comparison_block', count($options), true, true);
 
-        $zip = new ZipArchive();
-        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
-            throw new \Exception("Cannot create ZIP archive at: {$zipPath}");
+                foreach ($options as $i => $option) {
+                    $index = $i + 1;
+                    $template->setValue("target_name#{$index}", $option['target_name']);
+                    $template->setValue("option_final_price#{$index}", 'Rp ' . number_format($option['final_price'], 0, ',', '.'));
+                    $template->setValue("option_psychological_price#{$index}", 'Rp ' . number_format($option['psychological_price'], 0, ',', '.'));
+                }
+            } catch (\Exception $e) {
+                Log::error("Failed to fill combination price comparison: " . $e->getMessage());
+            }
         }
-
-        foreach ($documents as $docPath) {
-            $zip->addFile($docPath, basename($docPath));
-        }
-        
-        $zip->close();
-
-        return $zipPath;
     }
 
     /**
-     * Clean up temporary document files
+     * Fill regular prices for non-comparison services
      */
-    private function cleanupTempFiles(array $files): void
+    private function fillRegularPrices(TemplateProcessor $template, array $allServicePrices, array $serviceTypes): void
     {
-        foreach ($files as $file) {
-            if (file_exists($file)) {
-                unlink($file);
+        // For single services without comparison, use first service price
+        $firstService = array_key_first($allServicePrices);
+        if ($firstService && isset($allServicePrices[$firstService]['options'][0])) {
+            $option = $allServicePrices[$firstService]['options'][0];
+            $template->setValue('final_price', 'Rp ' . number_format($option['final_price'], 0, ',', '.'));
+            $template->setValue('psychological_price', 'Rp ' . number_format($option['psychological_price'], 0, ',', '.'));
+            $template->setValue('guarantee_period', $option['guarantee_period'] ?? '1 tahun');
+        }
+    }
+
+    /**
+     * Fill combined material list for multiple services
+     */
+    private function fillCombinedMaterialList(TemplateProcessor $template, array $separatedItems, array $serviceTypes): void
+    {
+        $allItems = [];
+
+        foreach ($serviceTypes as $serviceType) {
+            if (isset($separatedItems[$serviceType])) {
+                $allItems = array_merge($allItems, $separatedItems[$serviceType]['preparation'] ?? []);
             }
         }
+
+        // Add additional items (shared across all services)
+        if (isset($separatedItems[array_key_first($separatedItems)]['additional'])) {
+            $allItems = array_merge($allItems, $separatedItems[array_key_first($separatedItems)]['additional']);
+        }
+
+        $this->fillMaterialList($template, ['preparation' => $allItems, 'additional' => []]);
+    }
+
+    /**
+     * Fill combined service details
+     */
+    private function fillCombinedServiceDetails(TemplateProcessor $template, array $serviceTypes, array $serviceDetails): void
+    {
+        foreach ($serviceTypes as $serviceType) {
+            if (isset($serviceDetails[$serviceType])) {
+                $this->fillServiceSpecificDetails($template, $serviceType, $serviceDetails[$serviceType]);
+            }
+        }
+    }
+
+    /**
+     * Generate combined output filename
+     */
+    private function generateCombinedOutputFilename(array $serviceTypes, string $clientName): string
+    {
+        $cleanClientName = preg_replace('/[^A-Za-z0-9\-]/', '', str_replace(' ', '-', $clientName));
+        $serviceString = implode('_', $serviceTypes);
+        $timestamp = date('Y-m-d_H-i-s');
+        return "proposal_{$serviceString}_{$cleanClientName}_{$timestamp}.docx";
     }
 
     private function applyServicePriceAdjustments(string $serviceType, float $rawPrice, float $area): array
@@ -703,7 +874,7 @@ class ProposalController extends Controller
                 $template->setValue('gpc_area_aplikasi', $serviceDetails['areaAplikasi'] ?? 'Seluruh Area');
                 $template->setValue('gpc_bahan_aktif', $serviceDetails['bahanAktifKimia'] ?? '-');
                 $template->setValue('gpc_status', $serviceDetails['status'] ?? 'Terdeteksi Hama');
-                
+
                 // Treatment methods
                 $treatments = $serviceDetails['treatment'] ?? [];
                 $template->setValue('gpc_treatment', is_array($treatments) ? implode(', ', $treatments) : $treatments);
@@ -713,7 +884,7 @@ class ProposalController extends Controller
                 // Rodent Control specific fields
                 $template->setValue('rc_tingkat_infestasi', $serviceDetails['tingkatInfestasi'] ?? 'Sedang');
                 $template->setValue('rc_rekomendasi_sanitasi', $serviceDetails['rekomendasiSanitasi'] ?? 'Perbaikan sanitasi diperlukan');
-                
+
                 $treatments = $serviceDetails['treatment'] ?? [];
                 $template->setValue('rc_treatment', is_array($treatments) ? implode(' & ', $treatments) : $treatments);
                 break;
@@ -723,7 +894,7 @@ class ProposalController extends Controller
                 $targetHama = $serviceDetails['targetHama'] ?? [];
                 $template->setValue('gprc_target_hama', is_array($targetHama) ? implode(', ', $targetHama) : $targetHama);
                 $template->setValue('gprc_tingkat_infestasi', $serviceDetails['tingkatInfestasi'] ?? 'Sedang');
-                
+
                 $treatments = $serviceDetails['treatment'] ?? [];
                 $template->setValue('gprc_treatment', is_array($treatments) ? implode(', ', $treatments) : $treatments);
                 break;
@@ -733,17 +904,17 @@ class ProposalController extends Controller
     private function fillGeneralAttributes(TemplateProcessor $template, array $data, string $serviceType, array $serviceDetails = [])
     {
         $luasTanah = $data['area_treatment'];
-        
+
         // Time estimation based on service type
         if ($serviceType === 'baiting' || $serviceType === 'RC') {
             $time_estimation = $luasTanah <= 999 ? '1 hari' : '2 hari';
             $worker_estimation = $luasTanah <= 999 ? '2 orang' : '3 orang';
         } else {
-            $time_estimation = $luasTanah <= 200 ? '4 hari' : 
-                              ($luasTanah <= 400 ? '7 hari' : 
-                              ($luasTanah <= 500 ? '10 hari' : '30 hari'));
-            $worker_estimation = $luasTanah <= 300 ? '2 orang' : 
-                                ($luasTanah <= 500 ? '3 orang' : '5 orang');
+            $time_estimation = $luasTanah <= 200 ? '4 hari' :
+                ($luasTanah <= 400 ? '7 hari' :
+                    ($luasTanah <= 500 ? '10 hari' : '30 hari'));
+            $worker_estimation = $luasTanah <= 300 ? '2 orang' :
+                ($luasTanah <= 500 ? '3 orang' : '5 orang');
         }
 
         $serviceLabels = [
@@ -774,37 +945,111 @@ class ProposalController extends Controller
         $hasImages = !empty($imageGroups) && isset($imageGroups[0]['paths']) && !empty($imageGroups[0]['paths'][0]);
 
         if (!$hasImages) {
+            Log::info('No images found, removing inspection section');
             $template->setValue('inspection_heading', '');
             try {
-                $template->cloneBlock('image_block', 0);
+                $template->cloneRowAndSetValues('image_desc', []);
+                Log::info('Successfully removed image table rows');
             } catch (\Exception $e) {
-                // Ignore if block doesn't exist
+                Log::info('No image table found to remove: ' . $e->getMessage());
             }
             return;
         }
 
+        Log::info('Setting inspection heading and processing ' . count($imageGroups) . ' image groups');
         $template->setValue('inspection_heading', 'HASIL INSPEKSI');
-        
+
         try {
-            $template->cloneBlock('image_block', count($imageGroups), true, true);
+            $imageRowData = [];
+            foreach ($imageGroups as $group) {
+                $description = !empty($group['description']) ? $group['description'] : 'Tidak ada detail';
+                $imageRowData[] = [
+                    'image_desc' => $description
+                ];
+            }
             
-            $targetHeight = 300;
-            $spacing = 10;
+            Log::info('Cloning image table rows');
+            $template->cloneRowAndSetValues('image_desc', $imageRowData);
+            Log::info('Successfully cloned image table rows');
             
             foreach ($imageGroups as $i => $group) {
                 $index = $i + 1;
-                $description = !empty($group['description']) ? $group['description'] : 'Tidak ada detail';
-                $template->setValue("image_desc#{$index}", $description);
-                
-                if (!empty($group['paths'])) {
-                    $this->processAndSetImage($template, "image_content#{$index}", $group['paths'], $index, $targetHeight, $spacing);
-                } else {
-                    $template->setValue("image_content#{$index}", '');
+                if (!empty($group['paths']) && !empty($group['paths'][0])) {
+                    $imagePath = public_path($group['paths'][0]);
+                    if (file_exists($imagePath)) {
+                        Log::info("Setting inspection image #{$index}: {$imagePath}");
+                        $template->setImageValue("image_content#{$index}", [
+                            'path' => $imagePath,
+                            'width' => 600,
+                            'height' => 300,
+                            'ratio' => false
+                        ]);
+                        Log::info("Successfully set image_content#{$index}");
+                    } else {
+                        Log::error("Image file not found: {$imagePath}");
+                    }
                 }
             }
         } catch (\Exception $e) {
-            Log::error("Failed to process images: " . $e->getMessage());
+            Log::error("Failed to process image table: " . $e->getMessage());
         }
+    }
+
+
+    private function processImageForTemplate(array $imagePaths, int $index, int $targetHeight, int $spacing): string
+    {
+        Log::info("Processing image template for index {$index} with paths:", $imagePaths);
+        $resized = [];
+        foreach ($imagePaths as $imgPath) {
+            if (!is_string($imgPath) || empty($imgPath)) {
+                Log::warning("Skipping invalid image path: " . var_export($imgPath, true));
+                continue;
+            }
+            $fullPath = public_path($imgPath);
+            Log::info("Checking image file: {$fullPath}");
+            if (file_exists($fullPath)) {
+                try {
+                    $img = Image::read($fullPath)->scaleDown(null, $targetHeight);
+                    if ($img->width() > 0 && $img->height() > 0) {
+                        $resized[] = $img;
+                        Log::info("Successfully processed image: {$fullPath} (size: {$img->width()}x{$img->height()})");
+                    }
+                } catch (\Exception $e) {
+                    Log::error("Could not process image: {$fullPath}. Error: " . $e->getMessage());
+                }
+            } else {
+                Log::error("Image file not found: {$fullPath}");
+            }
+        }
+
+        if (empty($resized)) {
+            Log::warning("No images were successfully processed for index {$index}");
+            return '';
+        }
+
+        $totalWidth = array_sum(array_map(fn($img) => $img->width(), $resized)) + ($spacing * (count($resized) - 1));
+        if ($totalWidth <= 0 || $targetHeight <= 0) {
+            Log::error("Invalid canvas dimensions: width={$totalWidth}, height={$targetHeight}");
+            return '';
+        }
+
+        Log::info("Creating canvas with dimensions: {$totalWidth}x{$targetHeight}");
+        $canvas = (new ImageManager(new Driver()))->create($totalWidth, $targetHeight)->fill('ffffff');
+
+        $x = 0;
+        foreach ($resized as $ri) {
+            $canvas->place($ri, 'top-left', $x, 0);
+            $x += $ri->width() + $spacing;
+        }
+
+        $outPath = storage_path("app/public/generated/image_group_{$index}_" . time() . ".png");
+        if (!file_exists(dirname($outPath))) {
+            mkdir(dirname($outPath), 0755, true);
+        }
+        $canvas->save($outPath);
+        Log::info("Saved combined image to: {$outPath}");
+
+        return $outPath;
     }
 
     private function processAndSetImage(TemplateProcessor $template, string $placeholder, array $imagePaths, int $index, int $targetHeight, int $spacing)
@@ -862,17 +1107,59 @@ class ProposalController extends Controller
     private function clearUnusedPlaceholders(TemplateProcessor $template)
     {
         $placeholders = [
-            'inspection_heading', 'image_desc', 'image_content',
-            'option_name', 'option_description', 'option_final_price',
-            'option_psychological_price', 'option_guarantee', 'option_quantity',
-            'service_name', 'service_description', 'final_price', 'psychological_price',
-            'material_name', 'material_qty',
-            'tc_treatment', 'tc_status',
-            'gpc_target_hama', 'gpc_area_aplikasi', 'gpc_bahan_aktif', 'gpc_status', 'gpc_treatment',
-            'rc_tingkat_infestasi', 'rc_rekomendasi_sanitasi', 'rc_treatment',
-            'gprc_target_hama', 'gprc_tingkat_infestasi', 'gprc_treatment',
+            'inspection_heading',
+            'image_desc',
+            'image_content',
+            'option_name',
+            'option_description',
+            'option_final_price',
+            'option_psychological_price',
+            'option_guarantee',
+            'option_quantity',
+            'service_name',
+            'service_description',
+            'final_price',
+            'psychological_price',
+            'material_name',
+            'material_qty',
+            'tc_treatment',
+            'tc_status',
+            'gpc_target_hama',
+            'gpc_area_aplikasi',
+            'gpc_bahan_aktif',
+            'gpc_status',
+            'gpc_treatment',
+            'rc_tingkat_infestasi',
+            'rc_rekomendasi_sanitasi',
+            'rc_treatment',
+            'gprc_target_hama',
+            'gprc_tingkat_infestasi',
+            'gprc_treatment',
+            'chem_name',
+            'chem_desc_1',
+            'chem_desc_2',
+            'chem_desc_3',
+            'chem_image',
+            'price_block_counter',
+            'price_treatment_name',
+            'price_psychological',
+            'price_final',
+            'price_guarantee',
+            'target_name'
         ];
 
+        // Clear numbered placeholders (up to 10 for safety)
+        for ($i = 1; $i <= 10; $i++) {
+            foreach ($placeholders as $placeholder) {
+                try {
+                    $template->setValue("{$placeholder}#{$i}", '');
+                } catch (\Exception $e) {
+                    // Ignore errors for placeholders that may not exist
+                }
+            }
+        }
+
+        // Clear base placeholders
         foreach ($placeholders as $placeholder) {
             try {
                 $template->setValue($placeholder, '');
@@ -896,6 +1183,8 @@ class ProposalController extends Controller
 
     private function fillChemicalAndPriceBlocks(TemplateProcessor $template, array $options, float $area): void
     {
+        Log::info('Starting fillChemicalAndPriceBlocks with options:', $options);
+
         $chemicalDetails = [
             'Expose Soil Treatent per Liter Larutan' => [
                 'name' => 'Expose 55 SC',
@@ -924,35 +1213,53 @@ class ProposalController extends Controller
         ];
 
         $chemCount = count($options);
+        Log::info("Processing {$chemCount} chemical options");
 
+        // Process chemical blocks using cloneRowAndSetValues like price table
         try {
-            $template->cloneBlock('chemical_block', $chemCount, true, true);
-            Log::info("Cloned chemical_block successfully", ['count' => $chemCount]);
-
-            $i = 1;
+            $chemicalRowData = [];
             foreach ($options as $option) {
                 $chemicalKey = $option['name'];
                 if (isset($chemicalDetails[$chemicalKey])) {
                     $details = $chemicalDetails[$chemicalKey];
-
-                    $template->setValue("chem_name#{$i}", $details['name']);
-                    $template->setValue("chem_desc_1#{$i}", $details['desc_1']);
-                    $template->setValue("chem_desc_2#{$i}", $details['desc_2']);
-                    $template->setValue("chem_desc_3#{$i}", $details['desc_3']);
-
-                    if (file_exists($details['image'])) {
-                        $template->setImageValue("chem_image#{$i}", [
-                            'path' => $details['image'], 'width' => 150, 'height' => 150, 'ratio' => false
-                        ]);
-                    }
-                    Log::info("Successfully filled chemical_block #{$i}");
+                    $chemicalRowData[] = [
+                        'chem_name' => $details['name'],
+                        'chem_desc_1' => $details['desc_1'],
+                        'chem_desc_2' => $details['desc_2'],
+                        'chem_desc_3' => $details['desc_3']
+                    ];
                 }
-                $i++;
+            }
+
+            if (!empty($chemicalRowData)) {
+                $template->cloneRowAndSetValues('chem_name', $chemicalRowData);
+
+                // Set images separately after cloning
+                foreach ($options as $i => $option) {
+                    $chemicalKey = $option['name'];
+                    if (isset($chemicalDetails[$chemicalKey])) {
+                        $details = $chemicalDetails[$chemicalKey];
+                        $index = $i + 1;
+
+                        if (file_exists($details['image'])) {
+                            $template->setImageValue("chem_image#{$index}", [
+                                'path' => $details['image'],
+                                'width' => 150,
+                                'height' => 150,
+                                'ratio' => false
+                            ]);
+                            Log::info("Set chemical image #{$index}: {$details['image']}");
+                        }
+                    }
+                }
+
+                Log::info("Cloned chemical rows successfully");
             }
         } catch (\Exception $e) {
             Log::error("Failed to process chemical_block: " . $e->getMessage());
         }
 
+        // Process price blocks
         try {
             $rowData = $this->preparePriceRowDataForTC($options, $chemicalDetails);
             $template->cloneRowAndSetValues('price_block_counter', $rowData);
