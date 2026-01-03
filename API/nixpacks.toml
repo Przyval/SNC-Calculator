@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["php82", "php82Extensions.sqlite3", "php82Extensions.pdo_sqlite", "php82Extensions.bcmath", "php82Extensions.curl", "php82Extensions.mbstring", "php82Extensions.tokenizer", "php82Extensions.xml", "php82Extensions.zip", "nodejs_20", "nginx"]
+nixPkgs = ["php82", "php82Extensions.sqlite3", "php82Extensions.pdo_sqlite", "php82Extensions.bcmath", "php82Extensions.curl", "php82Extensions.mbstring", "php82Extensions.tokenizer", "php82Extensions.xml", "php82Extensions.zip", "php82Extensions.gd", "php82Extensions.fileinfo", "nodejs_20", "nginx"]
 
 [phases.build]
 cmds = [
