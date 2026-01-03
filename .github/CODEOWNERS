@@ -1,0 +1,14 @@
+# CODEOWNERS - Defines who reviews code in different areas
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+*       @Przyval
+
+# Backend (Laravel API)
+/API/   @Przyval
+
+# Frontend (Next.js)
+/FRONT/ @Przyval
+
+# CI/CD Configuration
+/.github/ @Przyval
