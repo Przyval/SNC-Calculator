@@ -103,3 +103,12 @@ jobs:
         run: pnpm build
         env:
           NEXT_PUBLIC_API_URL: https://api.example.com/api
+
+      - name: Install Playwright Browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run E2E Tests
+        run: pnpm test:e2e
+        env:
+          CI: true
+          NEXT_PUBLIC_API_URL: https://api.example.com/api
