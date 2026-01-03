@@ -517,8 +517,8 @@ class ProposalController extends Controller
 
         $options[] = [
             'target_name' => 'serangga kecoa, semut, nyamuk, lalat, tikus',
-            'final_price' => $gprcPrices['options'][0]['final_price'],
-            'psychological_price' => $gprcPrices['options'][0]['psychological_price'],
+            'final_price' => $gprcPrices[0]['final_price'],
+            'psychological_price' => $gprcPrices[0]['psychological_price'],
         ];
 
         return ['options' => $options];
@@ -537,8 +537,8 @@ class ProposalController extends Controller
 
         $options[] = [
             'target_name' => 'tikus',
-            'final_price' => $rcPrices['options'][0]['final_price'],
-            'psychological_price' => $rcPrices['options'][0]['psychological_price'],
+            'final_price' => $rcPrices[0]['final_price'],
+            'psychological_price' => $rcPrices[0]['psychological_price'],
         ];
 
         // GPRC option
@@ -547,8 +547,8 @@ class ProposalController extends Controller
 
         $options[] = [
             'target_name' => 'serangga kecoa, semut, nyamuk, lalat, tikus',
-            'final_price' => $gprcPrices['options'][0]['final_price'],
-            'psychological_price' => $gprcPrices['options'][0]['psychological_price'],
+            'final_price' => $gprcPrices[0]['final_price'],
+            'psychological_price' => $gprcPrices[0]['psychological_price'],
         ];
 
         return ['options' => $options];
@@ -611,7 +611,7 @@ class ProposalController extends Controller
             $serviceType = $serviceTypes[0];
             $templateMap = [
                 'TC' => 'inject_spraying',
-                'GPC' => 'pengendalian_kecoa',
+                'GPC' => 'gpc',
                 'RC' => 'baiting',
                 'GPRC' => 'integrated_pest_management_(gprc)',
             ];
@@ -967,11 +967,11 @@ class ProposalController extends Controller
                     'image_desc' => $description
                 ];
             }
-            
+
             Log::info('Cloning image table rows');
             $template->cloneRowAndSetValues('image_desc', $imageRowData);
             Log::info('Successfully cloned image table rows');
-            
+
             foreach ($imageGroups as $i => $group) {
                 $index = $i + 1;
                 if (!empty($group['paths']) && !empty($group['paths'][0])) {
